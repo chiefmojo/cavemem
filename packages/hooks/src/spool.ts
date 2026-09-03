@@ -110,49 +110,24 @@ export async function drainSpool(
 function tryAcquireLock(spool: string): SpoolLock | null {
   mkdirSync(dirname(spool), { recursive: true });
   const path = `${spool}.lock`;
-  let staleChecked = false;
-  while (true) {
+  try {
+    const fd = openSync(path, 'wx', 0o600);
     try {
-      const fd = openSync(path, 'wx', 0o600);
-      try {
-        writeFileSync(fd, `${process.pid}\n`, 'utf8');
-      } catch (err) {
-        closeSync(fd);
-        try {
-          unlinkSync(path);
-        } catch {
-          // Best-effort cleanup; the original lock-write error is authoritative.
-        }
-        throw err;
-      }
-      return { fd, path };
+      writeFileSync(fd, `${process.pid}\n`, 'utf8');
     } catch (err) {
-      if (!hasCode(err, 'EEXIST')) throw err;
-      if (staleChecked || !removeDeadProcessLock(path)) return null;
-      staleChecked = true;
+      closeSync(fd);
+      try {
+        unlinkSync(path);
+      } catch {
+        // Best-effort cleanup; the original lock-write error is authoritative.
+      }
+      throw err;
     }
-  }
-}
-
-function removeDeadProcessLock(path: string): boolean {
-  let pid: number;
-  try {
-    pid = Number(readFileSync(path, 'utf8').trim());
-  } catch {
-    return false;
-  }
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return false;
+    return { fd, path };
   } catch (err) {
-    if (!hasCode(err, 'ESRCH')) return false;
-  }
-  try {
-    unlinkSync(path);
-    return true;
-  } catch (err) {
-    return hasCode(err, 'ENOENT');
+    if (!hasCode(err, 'EEXIST')) throw err;
+    logLockedSpool();
+    return null;
   }
 }
 
@@ -163,8 +138,8 @@ function releaseLock(lock: SpoolLock): void {
     try {
       unlinkSync(lock.path);
     } catch {
-      // Fail open. The owning CLI process is short-lived; a later process can
-      // reclaim the lock after this PID exits.
+      // Fail open without reaping: safe ownership transfer needs more than
+      // Node's standard filesystem primitives. Manual clearing may be needed.
     }
   }
 }
@@ -186,5 +161,21 @@ function logMalformedEntry(): void {
     );
   } catch {
     // Logging must not wedge or preserve a malformed queue entry.
+  }
+}
+
+function logLockedSpool(): void {
+  try {
+    process.stderr.write(
+      `${JSON.stringify({
+        remote: true,
+        spool: true,
+        ok: false,
+        reason: 'locked',
+        error: 'spool lock exists; operation deferred',
+      })}\n`,
+    );
+  } catch {
+    // Logging must not make lock contention block a hook.
   }
 }

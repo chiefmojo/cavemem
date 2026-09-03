@@ -109,6 +109,38 @@ describe('spool', () => {
     expect(spoolDepth(path)).toBe(1);
   });
 
+  it('does not reclaim a pre-existing lock and leaves the queue unchanged', async () => {
+    appendSpool(path, entry(0));
+    writeFileSync(`${path}.lock`, '999999999\n', 'utf8');
+    const logs: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      logs.push(String(chunk));
+      return true;
+    });
+    const sent: number[] = [];
+
+    const drained = await drainSpool(path, async (e) => {
+      sent.push(e.ts);
+    });
+    let appendContended = false;
+    try {
+      appendSpool(path, entry(1));
+    } catch {
+      appendContended = true;
+    }
+
+    const lines = readFileSync(path, 'utf8').trim().split('\n');
+    expect(drained).toBe(0);
+    expect(sent).toEqual([]);
+    expect(appendContended).toBe(true);
+    expect(existsSync(`${path}.lock`)).toBe(true);
+    expect(lines).toHaveLength(1);
+    expect((JSON.parse(lines[0] ?? '{}') as SpoolEntry).ts).toBe(0);
+    expect(logs.map((line) => JSON.parse(line) as Record<string, unknown>)).toContainEqual(
+      expect.objectContaining({ spool: true, ok: false, reason: 'locked' }),
+    );
+  });
+
   it('logs and discards malformed JSON without counting it as sent', async () => {
     writeFileSync(path, `{not-json}\n${JSON.stringify(entry(1))}\n`, 'utf8');
     const logs: string[] = [];
