@@ -93,7 +93,12 @@ export async function drainSpool(
         await send(entry);
         processed++;
         sent++;
-      } catch {
+      } catch (err) {
+        if (isPermanentRemoteError(err)) {
+          processed++;
+          logPermanentEntry();
+          continue;
+        }
         break;
       }
     }
@@ -105,6 +110,10 @@ export async function drainSpool(
   } finally {
     releaseLock(lock);
   }
+}
+
+function isPermanentRemoteError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'RemotePermanentError';
 }
 
 function tryAcquireLock(spool: string): SpoolLock | null {
@@ -163,6 +172,16 @@ function logMalformedEntry(): void {
     );
   } catch {
     // Logging must not wedge or preserve a malformed queue entry.
+  }
+}
+
+function logPermanentEntry(): void {
+  try {
+    process.stderr.write(
+      `${JSON.stringify({ remote: true, spool: true, ok: false, reason: 'permanent', error: 'remote worker rejected spooled entry; entry discarded' })}\n`,
+    );
+  } catch {
+    // Logging must not wedge queue recovery.
   }
 }
 

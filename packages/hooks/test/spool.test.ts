@@ -69,6 +69,22 @@ describe('spool', () => {
     expect(spoolDepth(path)).toBe(2);
   });
 
+  it('discards a permanent failure and continues draining later entries', async () => {
+    for (let i = 0; i < 3; i++) appendSpool(path, entry(i));
+    const sent: number[] = [];
+    const n = await drainSpool(path, async (e) => {
+      if (e.ts === 0) {
+        const err = new Error('remote worker returned 400');
+        err.name = 'RemotePermanentError';
+        throw err;
+      }
+      sent.push(e.ts);
+    });
+    expect(n).toBe(2);
+    expect(sent).toEqual([1, 2]);
+    expect(spoolDepth(path)).toBe(0);
+  });
+
   it('coordinates overlapping drains without duplicate replay or lost rewrites', async () => {
     appendSpool(path, entry(0));
     let markStarted: (() => void) | undefined;

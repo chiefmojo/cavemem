@@ -14,6 +14,13 @@ export class RemoteAuthError extends Error {
   }
 }
 
+export class RemotePermanentError extends Error {
+  constructor(status: number) {
+    super(`remote worker returned ${status}`);
+    this.name = 'RemotePermanentError';
+  }
+}
+
 /** Null in local mode. Remote targets are canonical central-worker base URLs. */
 export function remoteTarget(settings: Settings): RemoteTarget | null {
   const url = settings.remote.url;
@@ -49,6 +56,7 @@ export async function postHook(
       signal: ac.signal,
     });
     if (res.status === 401) throw new RemoteAuthError();
+    if (res.status >= 400 && res.status < 500) throw new RemotePermanentError(res.status);
     if (!res.ok) throw new Error(`remote worker returned ${res.status}`);
     return (await res.json()) as HookResult;
   } finally {
