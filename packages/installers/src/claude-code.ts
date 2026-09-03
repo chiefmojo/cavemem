@@ -1,8 +1,12 @@
 import { copyFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { deepMerge, readJson, shellQuote, writeJson } from './fs-utils.js';
+import { readJson, shellQuote, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
+
+type ClaudeMcpEntry =
+  | { command: string; args?: string[]; env?: Record<string, string> }
+  | { type: 'http'; url: string; headers?: Record<string, string> };
 
 interface ClaudeHookEntry {
   matcher?: string;
@@ -13,11 +17,11 @@ interface ClaudeSettings {
   hooks?: Record<string, ClaudeHookEntry[]>;
   // Older versions of this installer wrote mcpServers here. Newer Claude Code
   // reads MCP config from ~/.claude.json instead, so we migrate it out.
-  mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
+  mcpServers?: Record<string, ClaudeMcpEntry>;
 }
 
 interface ClaudeJson {
-  mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
+  mcpServers?: Record<string, ClaudeMcpEntry>;
 }
 
 const HOOK_NAMES: Array<[string, string]> = [
@@ -106,15 +110,24 @@ export const claudeCode: Installer = {
     writeJson(settingsPath, settingsNext);
     messages.push(`wrote ${settingsPath}`);
 
-    // ---- mcpServers → ~/.claude.json: deep-merge to preserve user keys ----
+    // ---- mcpServers → ~/.claude.json: preserve user keys, replace ours ----
     const claudeJson = readJson<ClaudeJson>(mcpPath, {});
-    const mcpNext = deepMerge<ClaudeJson>(claudeJson, {
-      mcpServers: {
-        // Spawn node explicitly — if command is the .js file, Claude Code's
-        // MCP launcher can't exec it on Windows (EFTYPE).
-        cavemem: { command: ctx.nodeBin, args: [ctx.cliPath, 'mcp'] },
-      },
-    });
+    const entry: ClaudeMcpEntry = ctx.remote
+      ? {
+          type: 'http',
+          url: `${ctx.remote.url.replace(/\/+$/, '')}/mcp`,
+          headers: { Authorization: `Bearer ${ctx.remote.token}` },
+        }
+      : {
+          // Spawn node explicitly — if command is the .js file, Claude Code's
+          // MCP launcher can't exec it on Windows (EFTYPE).
+          command: ctx.nodeBin,
+          args: [ctx.cliPath, 'mcp'],
+        };
+    const mcpNext: ClaudeJson = {
+      ...claudeJson,
+      mcpServers: { ...(claudeJson.mcpServers ?? {}), cavemem: entry },
+    };
     writeJson(mcpPath, mcpNext);
     messages.push(`wrote ${mcpPath}`);
 

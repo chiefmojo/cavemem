@@ -7,18 +7,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { deepMerge, readJson, writeJson } from './fs-utils.js';
+import { readJson, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
+type OpenCodeMcpEntry =
+  | { type: 'local'; command: string[]; enabled: boolean }
+  | { type: 'remote'; url: string; headers?: Record<string, string>; enabled: boolean };
+
 interface OpenCodeConfig {
-  mcp?: Record<
-    string,
-    {
-      type: string;
-      command: string[];
-      enabled: boolean;
-    }
-  >;
+  mcp?: Record<string, OpenCodeMcpEntry>;
   mcpServers?: Record<string, { command: string; args?: string[] }>;
   plugin?: string[];
 }
@@ -63,15 +60,22 @@ export const openCode: Installer = {
     // 1. Write MCP config to the correct OpenCode config file.
     const path = configFile(ctx);
     const current = readJson<OpenCodeConfig>(path, {});
-    const next = deepMerge<OpenCodeConfig>(current, {
-      mcp: {
-        cavemem: {
+    const entry: OpenCodeMcpEntry = ctx.remote
+      ? {
+          type: 'remote',
+          url: `${ctx.remote.url.replace(/\/+$/, '')}/mcp`,
+          headers: { Authorization: `Bearer ${ctx.remote.token}` },
+          enabled: true,
+        }
+      : {
           type: 'local',
           command: [ctx.nodeBin, ctx.cliPath, 'mcp'],
           enabled: true,
-        },
-      },
-    });
+        };
+    const next: OpenCodeConfig = {
+      ...current,
+      mcp: { ...(current.mcp ?? {}), cavemem: entry },
+    };
     // Migrate away from the old `mcpServers` key a prior installer version
     // wrote into this same file (OpenCode never read it — it expects `mcp`).
     // Without this, upgrading in place leaves a stale, orphaned entry behind.
