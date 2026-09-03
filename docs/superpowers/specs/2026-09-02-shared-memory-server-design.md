@@ -29,7 +29,7 @@ One cavemem worker on the LAN owns the SQLite store. Every coding agent on every
 ## Findings that reshaped Faye's spec
 
 1. **Binding `0.0.0.0` alone breaks every request.** `apps/worker/src/security.ts` hardcodes the Host allowlist and Origin check to `127.0.0.1:<port>` / `localhost:<port>`. LAN requests get 403 before the bearer token is read. Needs a configurable allowlist.
-2. **SSE is the wrong transport.** Codex CLI 0.152 (`codex mcp add --url`) supports streamable HTTP only. SDK 1.29 deprecates `SSEServerTransport` and ships `WebStandardStreamableHTTPServerTransport`, which is fetch-API native and drops into Hono directly. Claude Code (`--transport http`) and OpenCode (`type: remote`) both speak it.
+2. **SSE is the wrong transport.** Codex CLI 0.152 (`codex mcp add --url`) supports streamable HTTP only. SDK 1.29 deprecates `SSEServerTransport` and ships `WebStandardStreamableHTTPServerTransport` (verified in the installed `node_modules` on wintermute: `dist/esm/server/webStandardStreamableHttp.d.ts`, `sessionIdGenerator` undefined = stateless mode, `handleRequest(Request): Promise<Response>`), which is fetch-API native and drops into Hono directly. Claude Code (`--transport http`) and OpenCode (`type: remote`) both speak it.
 3. **Hooks read, not just write.** `session-start` reads recent sessions and summaries to inject prior context; `session-end` reads turn summaries to roll up. A write-only `POST /api/observations` cannot serve them. Handlers therefore run server-side, one endpoint per hook event.
 4. **The worker self-exits.** `embedding.idleShutdownMs` defaults to 600 000; a central server must set `0`. Clients must also stop detach-spawning a local worker.
 5. **Per-session process duplication.** Today every stdio MCP client spawns its own `cavemem mcp` process with its own SQLite handle and, after the first search, its own copy of the embedding model. Mounting MCP in the worker removes all of it.
@@ -65,14 +65,16 @@ All fields get `.describe()` strings so `cavemem config show` documents them aut
 - `POST /api/hooks/:event` — bearer-protected. Body is `HookInput` JSON. Validates `:event` against `HookName`, calls `runHook(name, input, { store })` with the worker's store, returns `HookResult`. Injected store already means no auto-spawn and no close inside `runHook`; handlers run unmodified.
 - `ALL /mcp` — bearer-protected. Stateless `WebStandardStreamableHTTPServerTransport` (`sessionIdGenerator: undefined`). A fresh `buildServer()` and transport per request, as the SDK requires for stateless mode. Tool registration is five calls; cost is negligible.
 - `buildServer(store, settings, deps)` in `apps/mcp-server` gains `deps.embedder?: Embedder | null`. When supplied, the lazy loader is bypassed and the worker's already-loaded model is used. `apps/worker` adds a workspace dependency on `@cavemem/mcp-server` and imports `buildServer` from it; `apps/cli` already depends on both apps, so this app-to-app edge follows existing practice and keeps `packages/*` free of app imports. `apps/mcp-server` remains the stdio entrypoint for local mode; nothing is removed.
-- Security middleware reads `workerAllowedHosts`; bearer middleware unchanged.
+- `serve()` in `start()` binds `settings.workerHost` instead of the hardcoded `'127.0.0.1'`. The startup log line prints the bound host. Default stays loopback, so local mode is unchanged.
+- Security middleware reads `workerAllowedHosts`; bearer middleware unchanged. `/mcp` is **not** exempt from the Origin check: real MCP clients (Claude Code, Codex, OpenCode) send no Origin header and pass; a browser page would be a DNS-rebinding vector and should fail.
 - `worker run` stays the foreground entrypoint used by systemd.
 
 ### Client (`packages/hooks`)
 
 - `remote.ts`: `postHook(settings, name, input)` — one `fetch` POST with `AbortController` at `remote.timeoutMs`, `Authorization: Bearer` header. Returns the server's `HookResult`.
 - `runner.ts`: when `settings.remote.url` is set and no store is injected, delegate to `postHook` instead of opening a local store. Before sending, set `input.metadata.host = os.hostname()`.
-- `session-start.ts`: persist `metadata.host` on the session row (today `metadata` is always `null`).
+- `session-start.ts`: pass `metadata: { host }` through to `store.startSession`.
+- `packages/core` `MemoryStore.startSession` gains an optional `metadata?: Record<string, unknown>` parameter and stops hardcoding `metadata: null`. Storage already has the column and binds it; only the core signature changes.
 - `auto-spawn.ts`: return early when `remote.url` is set.
 - Spool (`spool.ts`): on POST failure other than 401, append `{ name, input, ts }` as one JSON line to `<dataDir>/spool.jsonl`. After any successful hook, replay up to 10 entries oldest-first, then stop. File is capped at 500 lines; when exceeded the oldest lines are dropped. Replayed rows receive server insert time, not original time. A partial drain stops at the first failure and leaves the remainder.
 
@@ -111,7 +113,7 @@ Hook commands are unchanged in all three: they still run `cavemem hook run <even
 
 | Condition | Outcome |
 |-----------|---------|
-| Server unreachable or timeout | Spool, one structured JSON log line to stderr, exit 0, empty context. |
+| Server unreachable or timeout | Spool, one structured JSON log line to stderr, exit 0, empty context. A session started during an outage gets no prior-session injection at all; that is accepted degradation, not a regression. |
 | 401 | Log line with `reason: "auth"`, no spool (replay would fail identically), exit 0. |
 | `remote.url` set, token missing | No POST. Log line, exit 0. `doctor` reports it. |
 | Spool replay fails mid-drain | Stop, keep remainder, retry on next successful hook. |
@@ -144,7 +146,7 @@ SQLite contention does not arise: one process, one writer.
 ## Testing
 
 - **Unit** (`packages/config`, `apps/worker`, `packages/hooks`, `packages/installers`): allowlist derivation from settings including the empty-list fallback; `/api/hooks/:event` through `buildApp` with a temp store for every event plus unknown event and missing bearer; `postHook` with mocked fetch covering success, timeout, 401, and non-401 failure; spool append, cap at 500, drain of 10, partial-drain stop; installer output for the three remote shapes and round-trip through uninstall.
-- **Integration**: MCP inspector against `/mcp` on a temp worker — `initialize`, all four core tools, `enrich` absent when disabled, 401 without bearer. Required by CLAUDE.md for MCP contract changes.
+- **Integration**: a vitest that boots `buildApp` on an ephemeral port with a temp store and drives `/mcp` with the SDK's own `StreamableHTTPClientTransport` plus `Client` — `initialize`, all four core tools, `enrich` absent when disabled, 401 without bearer, 403 with a browser-style `Origin` header. No browser inspector: it would send an Origin the allowlist rejects and its CORS preflight would fail first, for reasons unrelated to the MCP contract. Satisfies CLAUDE.md's contract-test requirement with a deterministic client.
 - **End-to-end**: a remote-mode leg in `scripts/e2e-publish.sh`. Start one packed install as server on a random port with `workerHost: 127.0.0.1` and an allowlist entry for it; drive a second isolated `$HOME` in remote mode through every Claude Code hook event; assert rows land in the server DB, the client DB does not exist, and `cavemem search` from the client returns a hit. Existing 15 checks stay green.
 - **Live**: wintermute against neuromancer. One full Claude Code session, then `cavemem search` from wintermute for a phrase said during it, then the same via the MCP `search` tool from Codex.
 
@@ -174,6 +176,10 @@ Verified against live source in `chiefmojo/cavemem` (`apps/{cli,worker,mcp-serve
 4. **`WebStandardStreamableHTTPServerTransport` name + stateless contract unverified here.** `pnpm-lock.yaml` resolves `@modelcontextprotocol/sdk@1.29.0` (consistent with Finding #2), but `node_modules` isn't installed in this checkout, so the class name and the `sessionIdGenerator: undefined` stateless behavior couldn't be confirmed against the actual SDK. Confirm at build time — it's load-bearing for the `/mcp` transport.
 
 5. **Graceful-degradation note (not a bug):** in remote mode, `session-start` returns empty context when the server is unreachable (error table: spool, exit 0, empty context). A remote session during an outage therefore starts with no prior-session injection at all. Acceptable per the non-goals, but worth stating so it isn't read as a regression during live testing.
+
+### Disposition (Claude, 2026-09-02)
+
+All five applied inline above: `serve()` bind item added to the server change list; `MemoryStore.startSession` metadata change listed under the client section; integration test rewritten to use the SDK client transport instead of the browser inspector, with `/mcp` kept under the Origin check; transport class and stateless contract confirmed against installed SDK 1.29.0; outage degradation stated in the error table.
 
 ### Verdict
 
