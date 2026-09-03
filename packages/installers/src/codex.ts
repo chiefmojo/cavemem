@@ -99,7 +99,7 @@ export const codex: Installer = {
     messages.push(`wrote ${cfgPath}`);
     if (ctx.remote) {
       messages.push(
-        `codex reads the bearer token from the environment — add to your shell profile:\n    export ${CODEX_TOKEN_ENV}=${ctx.remote.token}`,
+        `codex reads the bearer token from the environment — add to your shell profile:\n    export ${CODEX_TOKEN_ENV}=<your-cavemem-remote-token>`,
       );
     }
 

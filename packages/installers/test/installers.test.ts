@@ -529,7 +529,7 @@ describe('opencode installer', () => {
       JSON.stringify({
         theme: 'dark',
         mcp: { other: { type: 'local', command: ['echo'], enabled: true } },
-        plugin: ['some-other-plugin'],
+        plugin: ['some-other-plugin', 'my-cavemem-helper.js'],
       }),
     );
 
@@ -550,7 +550,7 @@ describe('opencode installer', () => {
     expect(after.theme).toBe('dark');
     expect(after.mcp.other).toBeDefined();
     expect(after.mcp.cavemem).toBeUndefined();
-    expect(after.plugin).toEqual(['some-other-plugin']);
+    expect(after.plugin).toEqual(['some-other-plugin', 'my-cavemem-helper.js']);
     expect(existsSync(pluginPath())).toBe(false);
   });
 
@@ -662,6 +662,7 @@ describe('remote mode MCP entries', () => {
       bearer_token_env_var: 'CAVEMEM_REMOTE_TOKEN',
     });
     expect(msgs.join('\n')).toContain('export CAVEMEM_REMOTE_TOKEN=');
+    expect(msgs.join('\n')).not.toContain(remote.token);
   });
 
   it('opencode writes a remote MCP entry with headers', async () => {

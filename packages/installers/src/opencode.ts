@@ -142,7 +142,7 @@ export const openCode: Installer = {
         if (Object.keys(current.mcpServers).length === 0) delete current.mcpServers;
       }
       if (current.plugin) {
-        current.plugin = current.plugin.filter((p) => !p.includes('cavemem'));
+        current.plugin = current.plugin.filter((p) => p !== 'file://./plugins/cavemem.js');
         if (current.plugin.length === 0) delete current.plugin;
       }
       writeJson(path, current);
