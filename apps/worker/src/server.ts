@@ -4,12 +4,24 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { expand } from '@cavemem/compress';
 import { type Settings, loadSettings, resolveDataDir } from '@cavemem/config';
-import { MemoryStore } from '@cavemem/core';
+import { type Embedder, MemoryStore } from '@cavemem/core';
 import { createEmbedder } from '@cavemem/embedding';
+import { type HookInput, type HookName, runHook } from '@cavemem/hooks';
+import { buildServer } from '@cavemem/mcp-server';
 import { serve } from '@hono/node-server';
+import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { type EmbedLoopHandle, startEmbedLoop, stateFilePath } from './embed-loop.js';
-import { bearerAuth, getOrCreateToken, hostAllowlist, originCheck } from './security.js';
+import {
+  allowedHostSet,
+  bearerAuth,
+  createViewerSessionStore,
+  getOrCreateToken,
+  hostAllowlist,
+  originCheck,
+  viewerAuth,
+} from './security.js';
 import { renderIndex, renderSession } from './viewer.js';
 
 export interface BuildAppOptions {
@@ -17,23 +29,65 @@ export interface BuildAppOptions {
   port: number;
   /** Bearer token required on /api/*; also injected into served HTML. */
   token: string;
+  /** Extra host:port values accepted in Host/Origin (settings.workerAllowedHosts). */
+  allowedHosts?: string[];
+  /** Pre-loaded embedder shared with /mcp; null when provider=none or load failed. */
+  embedder?: Embedder | null;
   loop?: EmbedLoopHandle | undefined;
 }
+
+const HOOK_NAMES: ReadonlySet<string> = new Set<HookName>([
+  'session-start',
+  'user-prompt-submit',
+  'post-tool-use',
+  'stop',
+  'session-end',
+]);
 
 export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
   const app = new Hono();
   const { port, token, loop } = opts;
 
   // Host/Origin checks apply to every route (kills DNS rebinding + CSRF from
-  // browser pages); the bearer token is scoped to /api/* only so the plain
-  // HTML pages keep loading with zero user friction.
-  app.use('*', hostAllowlist(port));
-  app.use('*', originCheck(port));
+  // browser pages). Every route except healthz requires auth because a LAN
+  // worker's viewer renders plaintext memory: HTML routes accept the cookie
+  // handshake (viewerAuth — a browser navigation can't carry a bearer
+  // header), everything else (/api/*, /mcp) stays bearer-only.
+  const allowed = allowedHostSet(port, opts.allowedHosts ?? []);
+  app.use('*', hostAllowlist(allowed));
+  app.use('*', originCheck(allowed));
   app.use('*', async (_c, next) => {
     loop?.touch();
     await next();
   });
-  app.use('/api/*', bearerAuth(token));
+  const viewerSessions = createViewerSessionStore();
+  const isViewerPath = (path: string) => path === '/' || path.startsWith('/sessions/');
+  app.use('*', async (c, next) => {
+    const path = c.req.path;
+    if (path === '/healthz') return next();
+    if (isViewerPath(path)) return viewerAuth(token, viewerSessions)(c, next);
+    return bearerAuth(token)(c, next);
+  });
+
+  // Bearer-protected like the rest of /api/*: mints the single-use nonce
+  // `cavemem viewer` puts in the handshake URL instead of the real token
+  // (security.ts — keeps the long-lived credential out of a spawned
+  // browser opener's argv and out of browser history).
+  app.post('/api/viewer-session', (c) => c.json({ token: viewerSessions.mint() }));
+
+  // Stateless streamable HTTP: one server + transport per request, as the SDK
+  // requires when sessionIdGenerator is undefined. Tool registration is five
+  // calls, so the per-request cost is negligible. Real MCP clients send no
+  // Origin header; the shared originCheck still applies so a browser page
+  // cannot reach this route (DNS rebinding).
+  app.all('/mcp', async (c) => {
+    const mcp = buildServer(store, store.settings, { embedder: opts.embedder ?? null });
+    // Omitting the optional generator selects stateless mode. SDK 1.29's
+    // declaration rejects an explicit `undefined` with exactOptionalPropertyTypes.
+    const transport = new WebStandardStreamableHTTPServerTransport({});
+    await mcp.connect(transport);
+    return transport.handleRequest(c.req.raw);
+  });
 
   app.get('/healthz', (c) => c.json({ ok: true }));
 
@@ -60,7 +114,28 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
     return c.json(await store.search(q, limit));
   });
 
-  app.get('/', (c) => c.html(renderIndex(store.storage.listSessions(50), token)));
+  // Remote-mode write path. The client ships the raw IDE payload; the same
+  // handlers that run in local mode run here against the worker's store, so
+  // redaction, exclusion, and compression stay in one place (spec decision 4).
+  app.post('/api/hooks/:event', bodyLimit({ maxSize: 1_048_576 }), async (c) => {
+    const event = c.req.param('event');
+    if (!HOOK_NAMES.has(event)) {
+      return c.json({ error: `unknown hook event: ${event}` }, 400);
+    }
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'body must be JSON' }, 400);
+    }
+    if (!body || typeof body !== 'object' || typeof (body as HookInput).session_id !== 'string') {
+      return c.json({ error: 'session_id is required' }, 400);
+    }
+    const result = await runHook(event as HookName, body as HookInput, { store });
+    return c.json(result);
+  });
+
+  app.get('/', (c) => c.html(renderIndex(store.storage.listSessions(50))));
   app.get('/sessions/:id', (c) => {
     const id = c.req.param('id');
     const session = store.storage.getSession(id);
@@ -70,7 +145,6 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
       renderSession(
         session,
         obs.map((r) => ({ ...r, content: expand(r.content) })),
-        token,
       ),
     );
   });
@@ -120,7 +194,7 @@ export async function start(): Promise<void> {
 
   // Build embedder if provider != 'none'. Model load runs in the worker
   // process only — hooks never wait for it.
-  let embedder = null;
+  let embedder: Embedder | null = null;
   try {
     embedder = await createEmbedder(settings, {
       log: (line) => process.stderr.write(`${line}\n`),
@@ -165,11 +239,24 @@ export async function start(): Promise<void> {
   }
 
   const token = getOrCreateToken(settings);
-  const app = buildApp(store, { port: settings.workerPort, token, loop });
-  servers.push(serve({ fetch: app.fetch, port: settings.workerPort, hostname: '127.0.0.1' }));
-  process.stderr.write(
-    `[cavemem worker] listening on http://127.0.0.1:${settings.workerPort} (pid ${process.pid})\n`,
+  const app = buildApp(store, {
+    port: settings.workerPort,
+    token,
+    allowedHosts: settings.workerAllowedHosts,
+    embedder,
+    loop,
+  });
+  servers.push(
+    serve({ fetch: app.fetch, port: settings.workerPort, hostname: settings.workerHost }),
   );
+  process.stderr.write(
+    `[cavemem worker] listening on http://${settings.workerHost}:${settings.workerPort} (pid ${process.pid})\n`,
+  );
+  if (settings.workerHost !== '127.0.0.1' && settings.workerAllowedHosts.length === 0) {
+    process.stderr.write(
+      '[cavemem worker] warning: bound off loopback with empty workerAllowedHosts — every non-loopback request will be rejected with 403\n',
+    );
+  }
 }
 
 if (isMainEntry()) {

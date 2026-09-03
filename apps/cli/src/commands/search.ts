@@ -4,6 +4,7 @@ import { MemoryStore } from '@cavemem/core';
 import { createEmbedder } from '@cavemem/embedding';
 import type { Command } from 'commander';
 import kleur from 'kleur';
+import { checkedRemoteTarget, remoteSearch } from '../util/remote.js';
 
 export function registerSearchCommand(program: Command): void {
   program
@@ -13,6 +14,16 @@ export function registerSearchCommand(program: Command): void {
     .option('--no-semantic', 'disable semantic re-rank, use BM25 only')
     .action(async (query: string, opts: { limit: string; semantic: boolean }) => {
       const settings = loadSettings();
+      const target = checkedRemoteTarget(settings);
+      if (target) {
+        const hits = await remoteSearch(target, query, Number(opts.limit));
+        for (const h of hits) {
+          process.stdout.write(
+            `${h.id}\t${h.score.toFixed(3)}\t${h.session_id}\t${h.snippet.replace(/\s+/g, ' ')}\n`,
+          );
+        }
+        return;
+      }
       const dbPath = join(resolveDataDir(settings.dataDir), 'data.db');
       const store = new MemoryStore({ dbPath, settings });
       try {

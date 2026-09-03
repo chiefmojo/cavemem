@@ -11,6 +11,13 @@ export interface InstallContext {
   nodeBin: string;
   /** Absolute path to the local data dir (e.g., ~/.cavemem). */
   dataDir: string;
+  /**
+   * Present when the machine is in remote mode (settings.remote.url set).
+   * Installers then write a URL-based MCP entry pointing at `<url>/mcp`
+   * instead of spawning `cavemem mcp` over stdio. Hook commands are the same
+   * in both modes — the CLI decides whether to write locally or POST.
+   */
+  remote?: { url: string; token: string };
 }
 
 /**

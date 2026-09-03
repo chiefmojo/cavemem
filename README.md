@@ -21,7 +21,7 @@
 
 ---
 
-Cross-agent persistent memory for coding assistants. Hooks fire at session boundaries, compress observations with the caveman grammar (~75% fewer prose tokens, code and paths preserved byte-for-byte), and write to local SQLite. Agents query their own history through three MCP tools. No network. No cloud.
+Cross-agent persistent memory for coding assistants. In the default local configuration, hooks fire at session boundaries, compress observations with the caveman grammar (~75% fewer prose tokens, code and paths preserved byte-for-byte), and write to local SQLite; agents query their own history over local MCP without network or cloud calls. Remote embedding providers, web enrichment, and remote mode are opt-in network features; remote mode sends hook and MCP traffic over the LAN to a central worker-owned store.
 
 **Supports:** Claude Code · OpenCode · Codex · GitHub Copilot · Augment Code · Cursor (query-only) · Gemini CLI (query-only) · Antigravity (query-only) · IBM Bob (query-only)
 
@@ -29,8 +29,8 @@ Cross-agent persistent memory for coding assistants. Hooks fire at session bound
 - **Compressed at rest.** Deterministic caveman grammar, round-trip-guaranteed expansion for humans.
 - **Progressive MCP retrieval.** `search`, `timeline`, `get_observations` — agents filter before fetching.
 - **Hybrid search.** SQLite FTS5 keyword + local vector index, combined with a tunable ranker.
-- **Local by default.** No network calls. Optional remote embedding providers via config.
-- **Web viewer.** Read-only UI at `http://localhost:37777` for browsing sessions in human-readable form. Token-protected: the worker generates a local bearer token on first start and injects it into the served page, so `cavemem viewer` still opens with zero friction while `/api/*` rejects requests without it.
+- **Local by default.** The default local configuration makes no network calls. Remote embedding providers and web enrichment are opt-in, and opt-in remote mode sends hook and MCP traffic to a central worker.
+- **Web viewer.** Read-only UI at `http://localhost:37777` for browsing sessions in human-readable form. Token-protected: the worker generates a local bearer token on first start; `cavemem viewer` uses it to mint a short-lived single-use nonce and opens the browser with a handshake that trades the nonce for a session cookie — the durable token itself never reaches a URL or a spawned browser process's arguments, so viewing still has zero friction while every route rejects requests without the token or cookie.
 - **Cross-IDE installers.** Claude Code, OpenCode, Codex, GitHub Copilot, Augment Code capture observations; Cursor, Gemini CLI, Antigravity, IBM Bob are query-only (MCP search over memory captured elsewhere) — one command each, see the [capability matrix](#install).
 - **Privacy-aware.** `<private>...</private>` stripped at write boundary. Path globs exclude whole directories.
 
@@ -46,7 +46,11 @@ cavemem status                     # see wiring + embedding backfill
 cavemem viewer                     # open http://127.0.0.1:37777
 ```
 
-No daemon to start. Hooks write synchronously. A local worker auto-spawns in the background on the first hook to build embeddings and serve the viewer; it self-exits when idle (set `embedding.idleShutdownMs` to `0` to keep it running until killed). Disable auto-spawn — and with it the HTTP listener — with `cavemem config set embedding.autoStart false`.
+In local mode, no daemon needs to be started manually. Hooks write synchronously, and a local worker auto-spawns in the background on the first hook to build embeddings and serve the viewer; it self-exits when idle (set `embedding.idleShutdownMs` to `0` to keep it running until killed). Disable auto-spawn — and with it the HTTP listener — with `cavemem config set embedding.autoStart false`.
+
+### Remote mode
+
+Remote mode lets one central worker own the memory store for agents on multiple machines. After setting `remote.url`, rerun `cavemem install --ide claude-code`, `cavemem install --ide codex`, and `cavemem install --ide opencode` so each IDE's existing MCP entry is rewritten for streamable HTTP; see [Remote mode](docs/remote.md) for settings, client behavior, and failure handling. See the [deployment runbook](deploy/README.md) to install and operate the shared server.
 
 ### IDE capability matrix
 

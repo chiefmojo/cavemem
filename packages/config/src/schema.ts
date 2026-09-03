@@ -22,12 +22,43 @@ export const SettingsSchema = z
           'it does not move settings.json. Only an explicit value is persisted — the ' +
           'default is re-resolved on every load, keeping settings.json portable.',
       ),
-    workerPort: z
-      .number()
-      .int()
-      .positive()
-      .default(37777)
-      .describe('Port the local worker binds to on 127.0.0.1.'),
+    workerPort: z.number().int().positive().default(37777).describe('Port the worker binds to.'),
+    workerHost: z
+      .string()
+      .default('127.0.0.1')
+      .describe(
+        'Interface the worker binds to. 127.0.0.1 (default) keeps it local; 0.0.0.0 exposes it ' +
+          'on the LAN for remote-mode clients. Off loopback you must also set workerAllowedHosts.',
+      ),
+    workerAllowedHosts: z
+      .array(z.string().regex(/^[^\s:/]+:\d{1,5}$/, 'expected host:port'))
+      .default([])
+      .describe(
+        'Extra host:port values accepted in the Host/Origin headers, e.g. ["neuromancer:37777"]. ' +
+          'Loopback is always accepted. Empty means loopback only, even when workerHost is 0.0.0.0.',
+      ),
+    remote: z
+      .object({
+        url: z
+          .string()
+          .url()
+          .regex(/^https?:\/\//, 'expected http(s) URL')
+          .optional()
+          .describe(
+            'Base URL of a central cavemem worker, e.g. http://neuromancer:37777. Setting it ' +
+              'switches this machine into remote mode: hooks POST to the server and installers ' +
+              'write URL-based MCP entries.',
+          ),
+        token: z.string().optional().describe("Bearer token from the server's worker-token file."),
+        timeoutMs: z
+          .number()
+          .int()
+          .positive()
+          .default(1500)
+          .describe('Abort deadline for a hook POST to the remote worker.'),
+      })
+      .default({ timeoutMs: 1500 })
+      .describe('Remote mode. Leave url unset for the default local mode.'),
     logLevel: z
       .enum(['debug', 'info', 'warn', 'error'])
       .default('info')

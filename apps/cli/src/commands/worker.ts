@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { loadSettings, resolveDataDir } from '@cavemem/config';
 import type { Command } from 'commander';
 import kleur from 'kleur';
+import { requireLocal } from '../util/mode.js';
 import { resolveCliPath } from '../util/resolve.js';
 
 function pidFile(): string {
@@ -25,6 +26,8 @@ export function registerWorkerCommand(program: Command): void {
   w.command('start')
     .description('Start the worker in the background')
     .action(async () => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'worker start')) return;
       const pf = pidFile();
       if (existsSync(pf)) {
         const pid = Number(readFileSync(pf, 'utf8'));
@@ -53,6 +56,8 @@ export function registerWorkerCommand(program: Command): void {
   w.command('run')
     .description('Run the worker in the foreground (internal)')
     .action(async () => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'worker run')) return;
       const mod = await import('@cavemem/worker');
       await mod.start();
     });
@@ -60,6 +65,8 @@ export function registerWorkerCommand(program: Command): void {
   w.command('stop')
     .description('Stop the worker daemon')
     .action(async () => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'worker stop')) return;
       const pf = pidFile();
       if (!existsSync(pf)) {
         process.stdout.write(`${kleur.dim('not running')}\n`);
@@ -79,6 +86,8 @@ export function registerWorkerCommand(program: Command): void {
   w.command('status')
     .description('Show worker status')
     .action(async () => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'worker status')) return;
       const pf = pidFile();
       if (!existsSync(pf)) {
         process.stdout.write(`${kleur.dim('not running')}\n`);

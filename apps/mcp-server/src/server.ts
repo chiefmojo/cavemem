@@ -14,6 +14,11 @@ import { enrichQuery } from './enrich.js';
 export interface ServerDeps {
   /** Injected for tests; defaults to global fetch. Only used by the opt-in enrich tool. */
   fetchImpl?: typeof fetch;
+  /**
+   * Pre-loaded embedder (or null for "none available"). The worker passes its
+   * own so the /mcp route never loads a second model. Undefined = lazy-load.
+   */
+  embedder?: Embedder | null;
 }
 
 /**
@@ -37,7 +42,7 @@ export function buildServer(
   });
 
   // tri-state: undefined = not yet attempted; null = unavailable (provider=none or load failed)
-  let embedder: Embedder | null | undefined = undefined;
+  let embedder: Embedder | null | undefined = deps.embedder;
   const resolveEmbedder = async (): Promise<Embedder | null> => {
     if (embedder !== undefined) return embedder;
     try {

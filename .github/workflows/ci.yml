@@ -26,3 +26,5 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: bash scripts/e2e-publish.sh
+      - run: bash scripts/e2e-remote.sh

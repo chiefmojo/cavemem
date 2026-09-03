@@ -19,6 +19,8 @@ import { type Settings, resolveDataDir } from '@cavemem/config';
  *     library context with no argv[1]), skip — silent no-op.
  */
 export function ensureWorkerRunning(settings: Settings): void {
+  // Remote mode: the store lives on another machine; never start a local worker.
+  if (settings.remote.url) return;
   if (process.env.CAVEMEM_NO_AUTOSTART) return;
   if (!settings.embedding.autoStart) return;
   if (settings.embedding.provider === 'none') return;

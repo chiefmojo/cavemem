@@ -14,11 +14,11 @@ The signature property of the project is that **memory is stored compressed**. E
 2. **Never compress technical tokens.** Code blocks, inline code, URLs, file paths, shell commands, version numbers, dates, numeric literals, and quoted identifiers are preserved byte-for-byte. The tokenizer in `packages/compress/src/tokenize.ts` is the single authority.
 3. **Round-trip tests must pass.** Any change to the compressor, the lexicon, or the tokenizer requires `pnpm --filter @cavemem/compress test` green, including the technical-token preservation suite.
 4. **Progressive disclosure in MCP.** `search` and `timeline` return compact results (IDs + snippets). Full observation bodies are only returned by `get_observations(ids[])`. Do not bloat the compact shapes.
-5. **Hot-path hooks are fast.** Hook handlers in `packages/hooks` must complete under 150 ms p95. Summarization, embedding, and indexing are handed off to the worker. No network calls in hooks.
-6. **Privacy is enforced at the write boundary.** Content inside `<private>…</private>` tags is stripped. Paths matching `settings.excludePatterns` are never read. Neither appears in logs.
+5. **Hot-path hooks are fast.** Local and server-injected hook handlers in `packages/hooks` must complete under 150 ms p95. Summarization, embedding, and indexing are handed off to the worker. Individual handlers make no network calls; in remote mode only the runner may perform a bounded hook POST and spool replay.
+6. **Privacy is enforced at the write boundary.** Content inside `<private>…</private>` tags is stripped. Paths matching `settings.excludePatterns` are never read. Neither appears in logs. The write boundary is the server's `MemoryStore`: in remote mode, raw hook payloads cross the LAN to the central worker before `excludePatterns` and `<private>` stripping apply (spec decision 4, 2026-09-02).
 7. **Local by default.** Default embedding provider is local (Transformers.js). Remote providers are opt-in via settings. Do not add default network calls.
-8. **No silent failures.** Hook and worker errors are logged as structured JSON; user-visible commands surface failures with a non-zero exit code and a short message.
-9. **No daemon on the write path.** Hooks write observations synchronously through `MemoryStore.addObservation` — never across a network or HTTP boundary. Hooks may *detach-spawn* the worker to kick off background embedding, but they must never wait on it. If the worker is down, writes still succeed; only the semantic-search side is degraded (BM25 keeps working).
+8. **No silent failures.** Hook and worker errors are logged as structured JSON; user-visible commands surface failures with a non-zero exit code and a short message. Remote hook delivery is the deliberate exception: it fails open with structured diagnostics and optional spooling so an IDE turn is not blocked.
+9. **No daemon on the local write path.** In local mode hooks write observations synchronously through `MemoryStore.addObservation` — never across a network or HTTP boundary. Hooks may *detach-spawn* the worker to kick off background embedding, but they must never wait on it. If the local worker is down, writes still succeed; only the semantic-search side is degraded (BM25 keeps working). In remote mode (`settings.remote.url` set) hooks POST synchronously to the central worker's `/api/hooks/:event` and never open a local store. Network, timeout, and non-401 HTTP failures are spooled; an invalid URL, missing token, or HTTP 401 logs without spooling.
 
 ## Architectural rules
 
@@ -32,8 +32,8 @@ The signature property of the project is that **memory is stored compressed**. E
 
 ```
 apps/cli          user-facing binary
-apps/worker       local HTTP daemon: read-only viewer + embedding backfill loop
-apps/mcp-server   stdio MCP server
+apps/worker       local HTTP daemon: viewer, embedding backfill, remote-mode hook endpoint, MCP over streamable HTTP at /mcp
+apps/mcp-server   stdio MCP server; buildServer() is shared with the worker's /mcp route
 packages/config   settings schema, loader, defaults, settingsDocs()
 packages/compress compression engine + lexicon
 packages/storage  SQLite + FTS5 + vector adapter
@@ -67,7 +67,7 @@ For deep work on a specific folder, also read that folder's `codemap.md`.
   - `pnpm lint`
   - `pnpm test`
   - `pnpm build`
-- New features require unit tests. Any change that affects MCP contracts requires an integration test via the MCP inspector.
+- New features require unit tests. Any change that affects MCP contracts requires an integration test: use the MCP inspector for stdio/local contracts, and the SDK's `StreamableHTTPClientTransport` for the worker's `/mcp` route because browser Origin/CORS policy intentionally rejects the inspector.
 - Every PR touching a package under `packages/*` or `apps/*` needs a changeset entry (`pnpm changeset`).
 
 ## End-to-end publish test
@@ -76,13 +76,14 @@ Unit tests cover handlers, storage, and protocol contracts in isolation. They ca
 
 - `bash scripts/e2e-publish.sh` — covers the **changeset publish** path (CI default). Builds, packs (mirroring what `changeset publish` ships), installs into an isolated `.e2e/` prefix with an isolated `$HOME`, drives every Claude Code hook event with a realistic payload, exercises FTS search and the MCP server, then uninstalls. Self-cleans on success. Required to pass in CI before `changeset publish` runs.
 - `bash scripts/e2e-pack-release.sh` — covers the **`pnpm publish:release`** path (legacy bespoke flow that uses `apps/cli/scripts/pack-release.mjs` to write `apps/cli/release/`). Run this if you change `pack-release.mjs` or the `dependencies` block of `apps/cli/package.json`.
+- `bash scripts/e2e-remote.sh` — covers remote mode: server + client on one box through the packed artifact, all hook events, spool/drain, MCP over HTTP. Required alongside `e2e-publish.sh`.
 - The 15 numbered checks in `e2e-publish.sh` must stay green. If you change anything in `apps/cli/`, `packages/installers/`, the hook handler stdout/stderr contract, or the publish surface, re-run it locally before opening a PR.
 - Touching the tsup config, the `prepublishOnly` script, or the bin entrypoint guards (`isMainEntry()`) without re-running both scripts is a defect.
 
 ## Extension points
 
 - **New IDE integration**: add a module in `packages/installers/src/` that implements the `Installer` interface (`detect`, `install`, `uninstall`, `status`) and register it in the installer index. Update the CLI `install` command choices.
-- **New MCP tool**: register in `apps/mcp-server/src/server.ts`, document contract in `docs/mcp.md`, add an inspector test fixture.
+- **New MCP tool**: register in `apps/mcp-server/src/server.ts`, document the contract in `docs/mcp.md`, and add the appropriate integration fixture: MCP inspector for stdio or the SDK client for streamable HTTP.
 - **New compression rule**: update `packages/compress/src/lexicon.json`, add at least one round-trip fixture under `packages/compress/test/fixtures/`, and re-run the benchmark in `evals/`.
 - **New embedding provider**: add a module in `packages/embedding/src/providers/`, wire it into the `createEmbedder` switch in `packages/embedding/src/index.ts`, and extend the `EmbeddingProvider` enum in `packages/config/src/schema.ts`. Each provider must expose `{ model, dim, embed(text) }` — `dim` must be correct before the first `embed()` call completes (warm-up probe).
 - **New storage migration**: add a numbered SQL file in `packages/storage/src/migrations/`. Migrations are forward-only.

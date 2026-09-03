@@ -8,6 +8,7 @@ export async function sessionStart(store: MemoryStore, input: HookInput): Promis
     id: input.session_id,
     ide: input.ide ?? 'unknown',
     cwd: input.cwd ?? null,
+    metadata: input.metadata ?? null,
   });
   // For resume/clear/compact the agent already has its own context; injecting
   // a "Prior-session context" preface would be noisy and possibly stale.

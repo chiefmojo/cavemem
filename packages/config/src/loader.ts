@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { defaultSettings } from './defaults.js';
-import { resolveCavememHome, resolveDataDir } from './home.js';
+import { resolveCavememHome, resolveDataDir, workerTokenPath } from './home.js';
 import { type Settings, SettingsSchema } from './schema.js';
 
-export { resolveDataDir } from './home.js';
+export { resolveDataDir, workerTokenPath } from './home.js';
 
 export function settingsPath(dataDir?: string): string {
   const dir = resolveDataDir(dataDir ?? resolveCavememHome());
@@ -37,5 +37,13 @@ export function saveSettings(settings: Settings, path?: string): void {
   const { dataDir, ...rest } = settings;
   const persisted = dataDir === resolveCavememHome() ? rest : settings;
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, `${JSON.stringify(persisted, null, 2)}\n`, 'utf8');
+  writeFileSync(target, `${JSON.stringify(persisted, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  try {
+    chmodSync(target, 0o600);
+  } catch {
+    // Best effort on filesystems without POSIX permissions.
+  }
 }

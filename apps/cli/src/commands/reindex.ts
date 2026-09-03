@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { loadSettings, resolveDataDir } from '@cavemem/config';
 import { Storage } from '@cavemem/storage';
 import type { Command } from 'commander';
+import { requireLocal } from '../util/mode.js';
 
 export function registerReindexCommand(program: Command): void {
   program
@@ -9,6 +10,7 @@ export function registerReindexCommand(program: Command): void {
     .description('Rebuild FTS index')
     .action(async () => {
       const settings = loadSettings();
+      if (!requireLocal(settings, 'reindex')) return;
       const s = new Storage(join(resolveDataDir(settings.dataDir), 'data.db'));
       try {
         s.rebuildFts();

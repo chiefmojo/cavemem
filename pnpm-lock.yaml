@@ -134,12 +134,21 @@ importers:
       '@cavemem/embedding':
         specifier: workspace:*
         version: link:../../packages/embedding
+      '@cavemem/hooks':
+        specifier: workspace:*
+        version: link:../../packages/hooks
+      '@cavemem/mcp-server':
+        specifier: workspace:*
+        version: link:../mcp-server
       '@cavemem/storage':
         specifier: workspace:*
         version: link:../../packages/storage
       '@hono/node-server':
         specifier: ^1.13.7
         version: 1.19.14(hono@4.12.14)
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@3.25.76)
       hono:
         specifier: ^4.6.10
         version: 4.12.14

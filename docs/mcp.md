@@ -1,6 +1,6 @@
 # MCP tools
 
-cavemem exposes four tools over an MCP stdio server, plus an opt-in `enrich` tool. The design goal is **progressive disclosure**: hits are compact until the agent asks for more.
+cavemem exposes four tools over MCP, either on a stdio server (`cavemem mcp`, local mode) or over streamable HTTP at `<remote.url>/mcp` (remote mode), plus an opt-in `enrich` tool. The design goal is **progressive disclosure**: hits are compact until the agent asks for more.
 
 The recommended workflow is a three-layer pattern:
 
@@ -86,3 +86,12 @@ Only public hosts are fetched: every URL and every redirect hop (followed manual
 ## Contract stability
 
 Fields may be added. Existing fields will not be removed or renamed within a minor version.
+
+## Transport
+
+| Mode | Transport | Client config |
+|------|-----------|---------------|
+| local | stdio, `cavemem mcp` | written by `cavemem install` |
+| remote | streamable HTTP, `POST <remote.url>/mcp`, bearer token | written by `cavemem install` when `settings.remote.url` is set |
+
+The HTTP transport is stateless: no session id, one server instance per request. It sits behind the worker's bearer check and Host/Origin allowlist, so browser pages cannot reach it. SSE is not offered — Codex CLI only speaks streamable HTTP and the SDK deprecates SSE.

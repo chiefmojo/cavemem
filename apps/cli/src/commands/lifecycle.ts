@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadSettings, resolveDataDir } from '@cavemem/config';
+import { loadSettings, resolveDataDir, workerTokenPath } from '@cavemem/config';
 import type { Command } from 'commander';
 import kleur from 'kleur';
+import { requireLocal } from '../util/mode.js';
 import { resolveCliPath } from '../util/resolve.js';
 
 /**
@@ -89,6 +90,8 @@ export function registerLifecycleCommands(program: Command): void {
     .command('start')
     .description('Start the worker daemon (embeddings + viewer)')
     .action(async () => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'start')) return;
       const pid = startWorker();
       if (pid) {
         const ready = await waitForPidOrPort();
@@ -107,6 +110,8 @@ export function registerLifecycleCommands(program: Command): void {
     .command('stop')
     .description('Stop the worker daemon')
     .action(() => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'stop')) return;
       if (stopWorker()) {
         process.stdout.write(`${kleur.green('stopped')}\n`);
       } else {
@@ -118,6 +123,8 @@ export function registerLifecycleCommands(program: Command): void {
     .command('restart')
     .description('Restart the worker daemon')
     .action(async () => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'restart')) return;
       stopWorker();
       // Give the old process a moment to release the port.
       await new Promise((r) => setTimeout(r, 300));
@@ -137,10 +144,38 @@ export function registerLifecycleCommands(program: Command): void {
     .command('viewer')
     .description('Open the memory viewer in your browser (auto-starts worker)')
     .action(async () => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'viewer')) return;
       startWorker(true);
       await waitForPidOrPort();
-      const port = loadSettings().workerPort;
-      const url = `http://127.0.0.1:${port}`;
+      const current = loadSettings();
+      const port = current.workerPort;
+      // The worker requires bearer auth on every route now (server.ts);
+      // browser navigation can't send an Authorization header, so the HTML
+      // routes trade a one-time nonce for a cookie (viewerAuth). The nonce
+      // — not the real worker-token — is what ends up in the opener's argv
+      // below (readable by any local user via `ps`/`/proc/<pid>/cmdline`),
+      // so it's minted fresh and single-use rather than being the durable
+      // credential itself: read after waitForPidOrPort so the worker has
+      // had a chance to write worker-token on a cold start.
+      let url = `http://127.0.0.1:${port}`;
+      try {
+        const token = readFileSync(workerTokenPath(current.dataDir), 'utf8').trim();
+        if (!token) throw new Error('worker-token file is empty');
+        const res = await fetch(`http://127.0.0.1:${port}/api/viewer-session`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error(`worker returned ${res.status}`);
+        const { token: nonce } = (await res.json()) as { token: string };
+        url += `/?token=${encodeURIComponent(nonce)}`;
+      } catch (err) {
+        process.stdout.write(
+          `${kleur.red('could not start viewer session')} — ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
       const cmd =
         process.platform === 'darwin'
           ? ['open', url]

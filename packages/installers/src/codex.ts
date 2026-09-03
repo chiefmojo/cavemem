@@ -5,6 +5,8 @@ import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { readJson, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
+export const CODEX_TOKEN_ENV = 'CAVEMEM_REMOTE_TOKEN';
+
 interface CodexHookCommand {
   type: 'command';
   command: string;
@@ -84,14 +86,22 @@ export const codex: Installer = {
 
     const mcpServers =
       (cfg.mcp_servers as Record<string, Record<string, unknown>> | undefined) ?? {};
-    mcpServers.cavemem = {
-      command: ctx.nodeBin,
-      args: [ctx.cliPath, 'mcp'],
-    };
+    mcpServers.cavemem = ctx.remote
+      ? {
+          url: `${ctx.remote.url.replace(/\/+$/, '')}/mcp`,
+          // Codex reads the bearer from its own environment, not from config.
+          bearer_token_env_var: CODEX_TOKEN_ENV,
+        }
+      : { command: ctx.nodeBin, args: [ctx.cliPath, 'mcp'] };
     cfg.mcp_servers = mcpServers;
 
     writeToml(cfgPath, cfg);
     messages.push(`wrote ${cfgPath}`);
+    if (ctx.remote) {
+      messages.push(
+        `codex reads the bearer token from the environment — add to your shell profile:\n    export ${CODEX_TOKEN_ENV}=<your-cavemem-remote-token>`,
+      );
+    }
 
     // ---- hooks.json: register cavemem entries; preserve user hooks ----
     const hooks = readJson<CodexHooksFile>(hooksPath, {});

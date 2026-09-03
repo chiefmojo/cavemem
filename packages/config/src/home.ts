@@ -9,6 +9,15 @@ export function resolveDataDir(raw: string): string {
   return resolve(raw);
 }
 
+/**
+ * Shared by the worker (which creates/reads it) and the CLI's `viewer`
+ * command (which reads it to build the cookie-handshake URL) — living in
+ * config keeps both sides off an `apps/worker`-to-`apps/cli` import.
+ */
+export function workerTokenPath(dataDir: string): string {
+  return join(resolveDataDir(dataDir), 'worker-token');
+}
+
 let cachedHome: string | undefined;
 
 /**

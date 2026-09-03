@@ -2,30 +2,31 @@
 
 ## Responsibility
 
-`@cavemem/hooks` is the write-path front door for captured memory: it implements the five IDE lifecycle hook handlers (`session-start`, `user-prompt-submit`, `post-tool-use`, `stop`, `session-end`), the dispatcher that runs them (`src/runner.ts#runHook`), and the fire-and-forget worker handoff (`src/auto-spawn.ts#ensureWorkerRunning`). Every observation and summary that enters cavemem during a coding session passes through `MemoryStore.addObservation` / `addSummary` here — synchronously, in-process, never across a network boundary. The package is `private: true` (not published); it is consumed only by `apps/cli`, whose `cavemem hook run <name>` command the per-IDE installers wire up.
+`@cavemem/hooks` is the mode-aware front door for captured memory. It implements the five IDE lifecycle handlers (`session-start`, `user-prompt-submit`, `post-tool-use`, `stop`, `session-end`) and `src/runner.ts#runHook`, which either executes them against a local/injected `MemoryStore` or sends the raw input to a central worker. Local mode also owns the fire-and-forget worker handoff (`src/auto-spawn.ts#ensureWorkerRunning`); remote mode owns bounded HTTP delivery and local spool/replay. The package is `private: true` and is consumed by both `apps/cli` and the worker's server-side hook endpoint.
 
 ## Design
 
-- **Hot-path budget (150 ms p95).** Handlers do no network I/O, no summarization, no embedding — only synchronous SQLite writes via `MemoryStore`. Heavy work (embeddings, indexing) is delegated to the worker daemon. `post-tool-use.ts` additionally bounds its own work: payload scanning is capped at `MAX_SCAN_LEN` (8000 chars) and per-field serialization at 500 chars so a giant tool response cannot blow the budget.
-- **Single dispatcher.** `runHook(name, input, opts)` in `src/runner.ts` switches on `HookName`, owns the `MemoryStore` lifecycle (constructs it from `loadSettings()` + `resolveDataDir(settings.dataDir)` + `data.db`, closes it in `finally`) unless the caller injects a store via `RunHookOptions.store` — the injection path exists so tests own the store lifecycle and skip both construction and `ensureWorkerRunning`.
-- **No-throw contract.** Handler exceptions are caught in `runHook` and converted into `HookResult { ok: false, error, ms }` rather than propagating, so the CLI caller can log structured JSON and exit non-zero without a stack trace escaping.
-- **Worker auto-spawn invariants** (`src/auto-spawn.ts`, documented in-source): <2 ms when the worker is already running (one `existsSync` on `worker.pid` + one `process.kill(pid, 0)` probe); never blocks the hook (`spawn` with `detached: true`, `stdio: 'ignore'`, `windowsHide: true`, `child.unref()`); skipped when `CAVEMEM_NO_AUTOSTART` is set, when `settings.embedding.autoStart` is false, or when `settings.embedding.provider === 'none'`; silent no-op when the CLI path (`process.argv[1]`) cannot be resolved. Spawn failures are swallowed — the hook still succeeds and the next hook retries.
+- **Hot-path budget (150 ms p95).** Individual handlers do no network I/O, summarization, or embedding — only synchronous `MemoryStore` work. The remote branch performs one timeout-bounded POST outside the handlers. `post-tool-use.ts` caps payload scanning at `MAX_SCAN_LEN` (8000 chars) and per-field serialization at 500 chars.
+- **Mode-aware dispatcher.** `runHook(name, input, opts)` adds `metadata.host`, then follows one of three paths. An injected store is used directly without construction, close, or auto-spawn; local mode owns a store at `<dataDir>/data.db`; remote mode validates `remote.url` and delegates to `runRemote` without opening a local store.
+- **Remote client** (`src/remote.ts`): `remoteTarget` accepts only an http(s) origin with no path/query/fragment. `postHook` performs one bearer-authenticated JSON POST to `/api/hooks/:event`, aborts at `remote.timeoutMs`, returns the server's `HookResult`, distinguishes HTTP 401 as `RemoteAuthError`, and throws for other non-2xx responses.
+- **Best-effort spool** (`src/spool.ts`): network, timeout, and non-401 HTTP failures attempt to append JSONL under `<dataDir>/spool.jsonl`; missing tokens, invalid targets, and 401 do not spool. The file is capped at 500 entries, successful HTTP delivery drains at most 10 oldest-first, partial failure keeps the remainder, malformed rows are logged and dropped, and a lock file prevents overlapping append/drain rewrites.
+- **No-throw/fail-open contract.** Handler exceptions become `HookResult { ok: false, error, ms }`. Remote target, token, auth, and delivery failures emit structured diagnostics and return `ok: true` with empty context so the IDE turn continues; the CLI then emits its normal hook telemetry.
+- **Worker auto-spawn invariants** (`src/auto-spawn.ts`, documented in-source): <2 ms when the local worker is already running (one `existsSync` + liveness probe); detached and never awaited; skipped in remote mode, under `CAVEMEM_NO_AUTOSTART`, when `embedding.autoStart` is false, or when the provider is `none`; spawn failures do not fail the hook.
 - **Debounce-by-skip.** `ensureWorkerRunning` is called after every hook except `session-end` — if the worker is alive (pidfile + liveness probe), the call is a cheap no-op; if not, one detached spawn happens and every concurrent hook call re-checks the pidfile.
 
 ## Flow
 
 IDE event → shell stub (`hooks-scripts/`) → `cavemem hook run <name> --ide <ide>` (apps/cli) → `runHook`:
 
-1. Load settings, open `MemoryStore` (unless injected).
-2. Dispatch to the handler; the handler writes through `MemoryStore` and, for `session-start` / `user-prompt-submit`, returns a context string.
-3. On success (non-`session-end`, non-injected), `ensureWorkerRunning(settings)` detaches the worker so embeddings/indexing happen in the background.
-4. Return `HookResult { ok, ms, context? }` to the CLI, close the store.
-
-If the worker is down or fails to spawn, writes still succeed — only semantic search degrades (BM25 keeps working).
+1. Add `metadata.host` when the caller did not supply one.
+2. Injected/server path: dispatch against the caller-owned store, return the handler result, and neither close the store nor auto-spawn a worker.
+3. Local path: load settings, open `MemoryStore`, dispatch synchronously, call `ensureWorkerRunning` after successful non-`session-end` hooks, return the result, and close the store. A missing local worker does not block writes; only semantic search degrades to BM25.
+4. Remote path: validate the central-worker target and token, POST the raw input, and after success replay up to 10 spooled entries. On 401, log without spooling; on other delivery failures, attempt to spool and log; then return fail-open `ok: true` with no context. No local database or worker is opened.
+5. `session-start` / `user-prompt-submit` may return context; other handlers return no stdout payload. `apps/cli` writes one normal structured telemetry line for every returned result in addition to any remote/spool diagnostic lines.
 
 ## Integration
 
-- Depends only on `@cavemem/config` (settings loading, `resolveDataDir`, `matchesGlob`) and `@cavemem/core` (`MemoryStore`) — consistent with the package order `config → compress → storage → {core, embedding} → hooks → installers`.
-- Consumed by `apps/cli` (the `hook run` command), which is itself invoked by the shell stubs under `hooks-scripts/` that `packages/installers` register in each IDE's config.
-- Public surface is the single export `.` in `package.json#exports`: `runHook`, `ensureWorkerRunning`, the five handlers, and the `HookName` / `HookInput` / `HookResult` types.
-- Tests: `test/runner.test.ts` and `test/post-tool-use.test.ts` (vitest), using the injected-store path.
+- Depends only on `@cavemem/config` (settings, data-dir resolution, capture globs) and `@cavemem/core` (`MemoryStore`), preserving the package dependency order.
+- `apps/cli` calls `runHook` from the installed hook commands; `apps/worker` calls it with an injected store from `POST /api/hooks/:event`. Per-IDE installers still invoke the same CLI hook command in both modes.
+- Public surface is the single `package.json#exports` entry: `runHook`, `ensureWorkerRunning`, remote target/client/error APIs, spool APIs, the five handlers, and their hook/spool types.
+- Tests: `test/runner.test.ts` covers local, injected, performance, and remote branches; `test/remote.test.ts` covers target validation, auth, non-2xx, and timeout; `test/spool.test.ts` covers cap/order/partial drain/locking/malformed rows; `test/post-tool-use.test.ts` covers capture filtering and bounded extraction.

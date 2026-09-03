@@ -10,6 +10,7 @@ import {
 import { type IdeName, checkWindowsSh, getInstaller, installers } from '@cavemem/installers';
 import type { Command } from 'commander';
 import kleur from 'kleur';
+import { checkedRemoteTarget } from '../util/remote.js';
 import { resolveCliPath } from '../util/resolve.js';
 
 // Hooks run through Claude Code's own `sh -c` wrapper on Windows (#56).
@@ -36,11 +37,20 @@ export function registerInstallCommand(program: Command): void {
         process.stdout.write(`${kleur.dim('wrote')} ${path}\n`);
       }
       const settings = loadSettings();
+      const target = checkedRemoteTarget(settings);
+      if (target && !target.token) {
+        process.stderr.write(
+          `${kleur.red('remote.url is set but remote.token is empty')} — copy the server's worker-token into settings first\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
       const ctx = {
         ideConfigDir: homedir(),
         cliPath: resolveCliPath(),
         nodeBin: process.execPath,
         dataDir: resolveDataDir(settings.dataDir),
+        ...(target?.token ? { remote: { url: target.url, token: target.token } } : {}),
       };
       const installer = getInstaller(name);
       const msgs = await installer.install(ctx);
@@ -63,13 +73,27 @@ export function registerInstallCommand(program: Command): void {
 
       process.stdout.write(`\n${kleur.bold('cavemem is wired into')} ${kleur.cyan(name)}\n`);
       process.stdout.write(
-        `${kleur.dim('memory writes happen in hooks — no daemon required on the hot path.')}\n\n`,
+        `${kleur.dim(
+          ctx.remote
+            ? `remote mode — hooks and MCP talk to ${ctx.remote.url}`
+            : 'memory writes happen in hooks — no daemon required on the hot path.',
+        )}\n\n`,
       );
       process.stdout.write(`${kleur.bold('what to try next:')}\n`);
       process.stdout.write(
         `  ${kleur.cyan('cavemem status')}        show wiring + embedding backfill\n`,
       );
-      process.stdout.write(`  ${kleur.cyan('cavemem viewer')}        open the memory viewer\n`);
+      process.stdout.write(
+        ctx.remote
+          ? // Viewer HTML now requires the cookie handshake (server.ts
+            // viewerAuth) — the bare URL 401s. Pointing at the nonce
+            // endpoint rather than telling the user to paste remote.token
+            // into the URL bar: that would put the durable credential in
+            // browser history. 6b95858 also means it can't be printed here.
+            `  ${kleur.cyan(`curl -X POST ${ctx.remote.url}/api/viewer-session -H "Authorization: Bearer <remote.token>"`)}\n` +
+              `  then open ${kleur.cyan(`${ctx.remote.url}/?token=<nonce from above>`)}        open the remote memory viewer\n`
+          : `  ${kleur.cyan('cavemem viewer')}        open the memory viewer\n`,
+      );
       process.stdout.write(
         `  ${kleur.cyan('cavemem search "…"')}    query your memory from the terminal\n`,
       );

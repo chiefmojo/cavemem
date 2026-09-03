@@ -14,12 +14,8 @@ const style = `
   code { background: #1d2129; padding: 1px 4px; border-radius: 3px; }
 `;
 
-function layout(title: string, body: string, token: string): string {
-  // Injected so any future client-side JS can call /api/* without the user
-  // having to do anything — the worker never sends this token in JSON
-  // responses, only into HTML it serves itself.
-  const tokenScript = `<script>window.__CAVEMEM_TOKEN__=${JSON.stringify(token)};</script>`;
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>${style}</style>${tokenScript}</head><body><header><h1>cavemem</h1><div class="meta">local memory viewer</div></header><main>${body}</main></body></html>`;
+function layout(title: string, body: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>${style}</style></head><body><header><h1>cavemem</h1><div class="meta">local memory viewer</div></header><main>${body}</main></body></html>`;
 }
 
 function esc(s: string): string {
@@ -29,8 +25,8 @@ function esc(s: string): string {
   );
 }
 
-export function renderIndex(sessions: SessionRow[], token: string): string {
-  if (sessions.length === 0) return layout('cavemem', '<p>No sessions yet.</p>', token);
+export function renderIndex(sessions: SessionRow[]): string {
+  if (sessions.length === 0) return layout('cavemem', '<p>No sessions yet.</p>');
   const items = sessions
     .map(
       (s) => `
@@ -40,13 +36,12 @@ export function renderIndex(sessions: SessionRow[], token: string): string {
       </div>`,
     )
     .join('');
-  return layout('cavemem · sessions', `<h2>Recent sessions</h2>${items}`, token);
+  return layout('cavemem · sessions', `<h2>Recent sessions</h2>${items}`);
 }
 
 export function renderSession(
   session: SessionRow,
   observations: Array<{ id: number; kind: string; ts: number; content: string }>,
-  token: string,
 ): string {
   const rows = observations
     .map(
@@ -60,6 +55,5 @@ export function renderSession(
   return layout(
     `cavemem · ${session.id}`,
     `<h2>${esc(session.id)} <span class="meta">(${esc(session.ide)})</span></h2><p><a href="/">&larr; all sessions</a></p>${rows}`,
-    token,
   );
 }

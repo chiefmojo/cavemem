@@ -529,7 +529,7 @@ describe('opencode installer', () => {
       JSON.stringify({
         theme: 'dark',
         mcp: { other: { type: 'local', command: ['echo'], enabled: true } },
-        plugin: ['some-other-plugin'],
+        plugin: ['some-other-plugin', 'my-cavemem-helper.js'],
       }),
     );
 
@@ -550,7 +550,7 @@ describe('opencode installer', () => {
     expect(after.theme).toBe('dark');
     expect(after.mcp.other).toBeDefined();
     expect(after.mcp.cavemem).toBeUndefined();
-    expect(after.plugin).toEqual(['some-other-plugin']);
+    expect(after.plugin).toEqual(['some-other-plugin', 'my-cavemem-helper.js']);
     expect(existsSync(pluginPath())).toBe(false);
   });
 
@@ -629,6 +629,60 @@ describe('checkWindowsSh (#56)', () => {
 
   it('resolveShDefault returns a boolean without throwing', () => {
     expect(typeof resolveShDefault()).toBe('boolean');
+  });
+});
+
+describe('remote mode MCP entries', () => {
+  const remote = { url: 'http://neuromancer:37777', token: 'tok123' };
+
+  it('claude-code writes an http MCP entry with Authorization header', async () => {
+    await claudeCode.install({ ...ctx, remote });
+    const json = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'));
+    expect(json.mcpServers.cavemem).toEqual({
+      type: 'http',
+      url: 'http://neuromancer:37777/mcp',
+      headers: { Authorization: 'Bearer tok123' },
+    });
+    // hooks unchanged: still run the local CLI
+    const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+    expect(JSON.stringify(settings.hooks)).toContain('hook run session-start');
+    await claudeCode.uninstall({ ...ctx, remote });
+    const after = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'));
+    expect(after.mcpServers?.cavemem).toBeUndefined();
+  });
+
+  it('codex writes url + bearer_token_env_var and prints the export hint', async () => {
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    const msgs = await codex.install({ ...ctx, remote });
+    const cfg = parseToml(readFileSync(join(home, '.codex', 'config.toml'), 'utf8')) as {
+      mcp_servers: { cavemem: Record<string, unknown> };
+    };
+    expect(cfg.mcp_servers.cavemem).toEqual({
+      url: 'http://neuromancer:37777/mcp',
+      bearer_token_env_var: 'CAVEMEM_REMOTE_TOKEN',
+    });
+    expect(msgs.join('\n')).toContain('export CAVEMEM_REMOTE_TOKEN=');
+    expect(msgs.join('\n')).not.toContain(remote.token);
+  });
+
+  it('opencode writes a remote MCP entry with headers', async () => {
+    await openCode.install({ ...ctx, remote });
+    const path = join(home, '.config', 'opencode', 'opencode.json');
+    const json = JSON.parse(readFileSync(path, 'utf8'));
+    expect(json.mcp.cavemem).toEqual({
+      type: 'remote',
+      url: 'http://neuromancer:37777/mcp',
+      headers: { Authorization: 'Bearer tok123' },
+      enabled: true,
+    });
+  });
+
+  it('re-installing without remote flips back to stdio', async () => {
+    await claudeCode.install({ ...ctx, remote });
+    await claudeCode.install(ctx);
+    const json = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'));
+    expect(json.mcpServers.cavemem.command).toBe('/fake/bin/node');
+    expect(json.mcpServers.cavemem.url).toBeUndefined();
   });
 });
 

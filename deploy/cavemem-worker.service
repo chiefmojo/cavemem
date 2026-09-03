@@ -1,0 +1,25 @@
+[Unit]
+Description=cavemem shared memory worker (HTTP + MCP + embedding backfill)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agentops
+Group=agentops
+WorkingDirectory=/home/agentops
+Environment=NODE_ENV=production
+Environment=CAVEMEM_NO_AUTOSTART=1
+Environment=PATH=/home/agentops/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/agentops/.local/bin/cavemem worker run
+Restart=on-failure
+RestartSec=3
+ProtectSystem=strict
+ProtectHome=read-only
+# Allow the worker's state directory while the filesystem sandbox is otherwise read-only.
+ReadWritePaths=/home/agentops/.cavemem
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

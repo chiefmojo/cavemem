@@ -1,5 +1,7 @@
 export { runHook } from './runner.js';
 export { ensureWorkerRunning } from './auto-spawn.js';
+export { postHook, remoteTarget, RemoteAuthError, type RemoteTarget } from './remote.js';
+export { spoolPath, spoolDepth, appendSpool, drainSpool, type SpoolEntry } from './spool.js';
 export type { HookName, HookInput, HookResult } from './types.js';
 export { sessionStart } from './handlers/session-start.js';
 export { userPromptSubmit } from './handlers/user-prompt-submit.js';

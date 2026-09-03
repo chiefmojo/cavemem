@@ -93,7 +93,7 @@ describe('worker HTTP', () => {
 
   it('GET / renders the session index HTML', async () => {
     seed();
-    const res = await req('/');
+    const res = await apiReq('/');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type') ?? '').toMatch(/text\/html/);
     const body = await res.text();
@@ -102,14 +102,14 @@ describe('worker HTTP', () => {
 
   it('GET /sessions/:id renders observation HTML', async () => {
     seed();
-    const res = await req('/sessions/s1');
+    const res = await apiReq('/sessions/s1');
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('/etc/caveman.conf');
   });
 
   it('GET /sessions/:unknown returns 404', async () => {
-    const res = await req('/sessions/does-not-exist');
+    const res = await apiReq('/sessions/does-not-exist');
     expect(res.status).toBe(404);
   });
 
@@ -173,24 +173,104 @@ describe('worker HTTP', () => {
       expect(res.status).toBe(200);
     });
 
-    it('does not require a token on non-API HTML routes', async () => {
+    it('rejects unauthenticated HTML routes', async () => {
       const res = await req('/');
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(401);
     });
   });
 
-  describe('viewer HTML token injection', () => {
-    it('embeds the token as window.__CAVEMEM_TOKEN__ on the index page', async () => {
-      const res = await req('/');
+  describe('viewer HTML credential exposure', () => {
+    it('does not embed the bearer token on the index page', async () => {
+      const res = await apiReq('/');
       const body = await res.text();
-      expect(body).toContain(`window.__CAVEMEM_TOKEN__=${JSON.stringify(TOKEN)}`);
+      expect(body).not.toContain(TOKEN);
     });
 
-    it('embeds the token on a session page', async () => {
+    it('does not embed the bearer token on a session page', async () => {
       seed();
-      const res = await req('/sessions/s1');
+      const res = await apiReq('/sessions/s1');
       const body = await res.text();
-      expect(body).toContain(`window.__CAVEMEM_TOKEN__=${JSON.stringify(TOKEN)}`);
+      expect(body).not.toContain(TOKEN);
+    });
+  });
+
+  describe('POST /api/viewer-session', () => {
+    it('requires the bearer token like the rest of /api/*', async () => {
+      const res = await req('/api/viewer-session', { method: 'POST' });
+      expect(res.status).toBe(401);
+    });
+
+    it('mints a nonce distinct from the real token', async () => {
+      const res = await apiReq('/api/viewer-session', { method: 'POST' });
+      expect(res.status).toBe(200);
+      const { token: nonce } = (await res.json()) as { token: string };
+      expect(nonce).not.toBe(TOKEN);
+      expect(nonce.length).toBeGreaterThan(0);
+    });
+  });
+
+  // A browser top-level navigation can only send cookies, not an
+  // Authorization header — `cavemem viewer` bootstraps the session with a
+  // one-time nonce (minted via POST /api/viewer-session) that trades for a
+  // cookie (viewerAuth). The nonce, not the real token, is what a spawned
+  // browser opener receives as an argv — that's the whole point of it.
+  describe('viewer cookie handshake', () => {
+    async function mintNonce(): Promise<string> {
+      const res = await apiReq('/api/viewer-session', { method: 'POST' });
+      const { token } = (await res.json()) as { token: string };
+      return token;
+    }
+
+    it('a valid nonce sets a cookie carrying the real token and redirects with the nonce stripped', async () => {
+      const nonce = await mintNonce();
+      const res = await app.request(`/?token=${nonce}`, { headers: { host: HOST } });
+      expect(res.status).toBe(302);
+      const setCookie = res.headers.get('set-cookie') ?? '';
+      expect(setCookie).toContain(`cavemem_viewer=${TOKEN}`);
+      expect(setCookie).toMatch(/HttpOnly/i);
+      expect(setCookie).toMatch(/SameSite=Strict/i);
+      expect(res.headers.get('location')).toBe('/');
+    });
+
+    it('preserves the path on a deep-linked handshake', async () => {
+      seed();
+      const nonce = await mintNonce();
+      const res = await app.request(`/sessions/s1?token=${nonce}`, {
+        headers: { host: HOST },
+      });
+      expect(res.status).toBe(302);
+      expect(res.headers.get('location')).toBe('/sessions/s1');
+    });
+
+    it('rejects a wrong nonce', async () => {
+      const res = await app.request('/?token=wrong', { headers: { host: HOST } });
+      expect(res.status).toBe(401);
+      expect(res.headers.get('set-cookie')).toBeNull();
+    });
+
+    it('rejects the real bearer token used directly as the handshake nonce', async () => {
+      // The whole point of the nonce indirection: even the real credential
+      // isn't a valid handshake value on its own.
+      const res = await app.request(`/?token=${TOKEN}`, { headers: { host: HOST } });
+      expect(res.status).toBe(401);
+    });
+
+    it('a nonce is single-use', async () => {
+      const nonce = await mintNonce();
+      const first = await app.request(`/?token=${nonce}`, { headers: { host: HOST } });
+      expect(first.status).toBe(302);
+      const second = await app.request(`/?token=${nonce}`, { headers: { host: HOST } });
+      expect(second.status).toBe(401);
+    });
+
+    it('the resulting cookie authenticates a later HTML request', async () => {
+      const res = await req('/', { headers: { cookie: `cavemem_viewer=${TOKEN}` } });
+      expect(res.status).toBe(200);
+    });
+
+    it('the viewer cookie does not authenticate /api/*', async () => {
+      const res = await req('/api/sessions', { headers: { cookie: `cavemem_viewer=${TOKEN}` } });
+      expect(res.status).toBe(401);
     });
   });
 });
@@ -220,5 +300,170 @@ describe('worker token file', () => {
     const first = getOrCreateToken(settings);
     const second = getOrCreateToken(settings);
     expect(second).toBe(first);
+  });
+});
+
+describe('worker allowlist', () => {
+  it('rejects a LAN Host header when no allowlist is configured', async () => {
+    const res = await app.request('/healthz', { headers: { host: 'neuromancer:37777' } });
+    expect(res.status).toBe(403);
+  });
+
+  it('accepts a configured LAN Host header and still accepts loopback', async () => {
+    const lan = buildApp(store, { port: PORT, token: TOKEN, allowedHosts: ['neuromancer:37777'] });
+    const a = await lan.request('/healthz', { headers: { host: 'neuromancer:37777' } });
+    expect(a.status).toBe(200);
+    const b = await lan.request('/healthz', { headers: { host: HOST } });
+    expect(b.status).toBe(200);
+    const c = await lan.request('/healthz', { headers: { host: 'other:37777' } });
+    expect(c.status).toBe(403);
+  });
+
+  it('accepts an Origin matching an allowlisted host and rejects others', async () => {
+    const lan = buildApp(store, { port: PORT, token: TOKEN, allowedHosts: ['neuromancer:37777'] });
+    const ok = await lan.request('/healthz', {
+      headers: { host: 'neuromancer:37777', origin: 'http://neuromancer:37777' },
+    });
+    expect(ok.status).toBe(200);
+    const bad = await lan.request('/healthz', {
+      headers: { host: 'neuromancer:37777', origin: 'http://evil.example' },
+    });
+    expect(bad.status).toBe(403);
+  });
+});
+
+describe('POST /api/hooks/:event', () => {
+  it('rejects without bearer', async () => {
+    const res = await req('/api/hooks/session-start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h1' }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('runs session-start and returns a HookResult', async () => {
+    const res = await apiReq('/api/hooks/session-start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session_id: 'h1',
+        ide: 'claude-code',
+        cwd: '/tmp',
+        metadata: { host: 'wintermute' },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; context?: string };
+    expect(body.ok).toBe(true);
+    expect(typeof body.context).toBe('string');
+    const row = store.storage.getSession('h1');
+    expect(row?.ide).toBe('claude-code');
+    expect(JSON.parse(row?.metadata ?? '{}').host).toBe('wintermute');
+  });
+
+  it('user-prompt-submit lands a compressed observation', async () => {
+    await apiReq('/api/hooks/session-start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h2', ide: 'codex' }),
+    });
+    const res = await apiReq('/api/hooks/user-prompt-submit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h2', prompt: 'Please basically fix /etc/hosts' }),
+    });
+    expect(res.status).toBe(200);
+    const tl = store.timeline('h2');
+    expect(tl).toHaveLength(1);
+    expect(tl[0]?.content).toContain('/etc/hosts');
+    expect(tl[0]?.content).not.toBe('Please basically fix /etc/hosts');
+    expect(tl[0]?.content).not.toContain('basically');
+  });
+
+  it('runs post-tool-use, stop, and session-end handlers', async () => {
+    await apiReq('/api/hooks/session-start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h3', ide: 'codex' }),
+    });
+    const tool = await apiReq('/api/hooks/post-tool-use', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session_id: 'h3',
+        tool_name: 'Read',
+        tool_input: { path: '/tmp/input.txt' },
+        tool_response: 'contents',
+      }),
+    });
+    expect(tool.status).toBe(200);
+    expect(((await tool.json()) as { ok: boolean }).ok).toBe(true);
+    expect(store.timeline('h3')).toHaveLength(1);
+    expect(store.timeline('h3')[0]?.kind).toBe('tool_use');
+
+    const stop = await apiReq('/api/hooks/stop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h3', last_assistant_message: 'Fixed the bug.' }),
+    });
+    expect(stop.status).toBe(200);
+    expect(((await stop.json()) as { ok: boolean }).ok).toBe(true);
+    expect(store.storage.listSummaries('h3').filter((s) => s.scope === 'turn')).toHaveLength(1);
+
+    const end = await apiReq('/api/hooks/session-end', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h3' }),
+    });
+    expect(end.status).toBe(200);
+    expect(((await end.json()) as { ok: boolean }).ok).toBe(true);
+    expect(store.storage.listSummaries('h3').filter((s) => s.scope === 'session')).toHaveLength(1);
+    expect(store.storage.getSession('h3')?.ended_at).not.toBeNull();
+  });
+
+  it('returns a failed HookResult with HTTP 200 when a handler fails', async () => {
+    const brokenStore = new MemoryStore({
+      dbPath: join(dir, 'broken.db'),
+      settings: defaultSettings,
+    });
+    const brokenApp = buildApp(brokenStore, { port: PORT, token: TOKEN });
+    brokenStore.close();
+    const res = await brokenApp.request('/api/hooks/session-start', {
+      method: 'POST',
+      headers: {
+        host: HOST,
+        authorization: `Bearer ${TOKEN}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ session_id: 'broken', ide: 'codex' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: expect.any(String),
+      ms: expect.any(Number),
+    });
+  });
+
+  it('400 on unknown event and on missing session_id', async () => {
+    const a = await apiReq('/api/hooks/not-a-hook', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"session_id":"x"}',
+    });
+    expect(a.status).toBe(400);
+    const b = await apiReq('/api/hooks/stop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"last_assistant_message":"hi"}',
+    });
+    expect(b.status).toBe(400);
+    const c = await apiReq('/api/hooks/stop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not json',
+    });
+    expect(c.status).toBe(400);
   });
 });

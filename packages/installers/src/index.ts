@@ -11,3 +11,4 @@ export {
   WINDOWS_SH_MISSING_WARNING,
   type CheckWindowsShOptions,
 } from './windows-sh.js';
+export { CODEX_TOKEN_ENV } from './codex.js';
