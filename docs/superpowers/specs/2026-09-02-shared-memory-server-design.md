@@ -41,7 +41,7 @@ One cavemem worker on the LAN owns the SQLite store. Every coding agent on every
 One binary, two modes, selected by the presence of `remote.url` in settings.
 
 - **Local mode** (default, no `remote.url`): identical to today. Hooks write to the local DB, `cavemem mcp` serves stdio, worker auto-spawns for embedding.
-- **Remote mode** (`remote.url` set): hooks POST to the server; installers write URL-based MCP entries; `cavemem search` calls `/api/search`; auto-spawn is disabled. Local-only commands (`worker`, `reindex`, `export`, `import`, `viewer`) exit non-zero with `remote mode: run this on the server`.
+- **Remote mode** (`remote.url` set): hooks POST to the server; installers write URL-based MCP entries; `cavemem search` calls `/api/search`; auto-spawn is disabled. Local-only commands (`worker`, `start`, `stop`, `restart`, `viewer`, `reindex`, `export`, `import`, and the stdio `mcp`) exit non-zero with `remote mode: run this on the server`.
 - **Server**: a local-mode install with `workerHost: "0.0.0.0"`, a non-empty `workerAllowedHosts`, and `idleShutdownMs: 0`.
 
 ### Settings (`packages/config`)
@@ -95,7 +95,7 @@ Hook commands are unchanged in all three: they still run `cavemem hook run <even
 - `search`: in remote mode, call `GET /api/search` with the bearer header.
 - `status`: in remote mode, report `remote.url`, reachability of `/healthz`, and spool depth.
 - `doctor`: in remote mode, verify token present, `/healthz` reachable, `/api/state` authorised; warn if a local worker pidfile exists.
-- `worker`, `reindex`, `export`, `import`, `viewer`: refuse in remote mode with a one-line message and exit 1.
+- `worker`, `start`, `stop`, `restart`, `viewer`, `reindex`, `export`, `import`, `mcp`: refuse in remote mode with a one-line message and exit 1. Refusing `mcp` matters: an IDE without HTTP support (Cursor, Gemini CLI) would otherwise query an empty local DB in silence.
 
 ### CLAUDE.md amendments
 
@@ -147,7 +147,7 @@ SQLite contention does not arise: one process, one writer.
 
 - **Unit** (`packages/config`, `apps/worker`, `packages/hooks`, `packages/installers`): allowlist derivation from settings including the empty-list fallback; `/api/hooks/:event` through `buildApp` with a temp store for every event plus unknown event and missing bearer; `postHook` with mocked fetch covering success, timeout, 401, and non-401 failure; spool append, cap at 500, drain of 10, partial-drain stop; installer output for the three remote shapes and round-trip through uninstall.
 - **Integration**: a vitest that boots `buildApp` on an ephemeral port with a temp store and drives `/mcp` with the SDK's own `StreamableHTTPClientTransport` plus `Client` — `initialize`, all four core tools, `enrich` absent when disabled, 401 without bearer, 403 with a browser-style `Origin` header. No browser inspector: it would send an Origin the allowlist rejects and its CORS preflight would fail first, for reasons unrelated to the MCP contract. Satisfies CLAUDE.md's contract-test requirement with a deterministic client.
-- **End-to-end**: a remote-mode leg in `scripts/e2e-publish.sh`. Start one packed install as server on a random port with `workerHost: 127.0.0.1` and an allowlist entry for it; drive a second isolated `$HOME` in remote mode through every Claude Code hook event; assert rows land in the server DB, the client DB does not exist, and `cavemem search` from the client returns a hit. Existing 15 checks stay green.
+- **End-to-end**: a separate `scripts/e2e-remote.sh` alongside `e2e-publish.sh`, so the existing 15 checks stay untouched. Start one packed install as server on a random port with `workerHost: 127.0.0.1` and an allowlist entry for it; drive a second isolated `$HOME` in remote mode through every Claude Code hook event; assert rows land in the server DB, the client DB does not exist, and `cavemem search` from the client returns a hit; kill and restart the server mid-run to prove spool and drain. Existing 15 checks stay green.
 - **Live**: wintermute against neuromancer. One full Claude Code session, then `cavemem search` from wintermute for a phrase said during it, then the same via the MCP `search` tool from Codex.
 
 ## Out of scope, noted for later
