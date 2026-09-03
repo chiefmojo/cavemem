@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultSettings } from '@cavemem/config';
 import { MemoryStore } from '@cavemem/core';
@@ -20,6 +20,23 @@ afterEach(() => {
 });
 
 describe('runHook', () => {
+  it('session-start stores the originating host in session metadata', async () => {
+    await runHook('session-start', { session_id: 'sess-host', ide: 'claude-code' }, { store });
+    const row = store.storage.getSession('sess-host');
+    const meta = JSON.parse(row?.metadata ?? '{}') as { host?: string };
+    expect(meta.host).toBe(hostname());
+  });
+
+  it('a caller-supplied metadata.host wins over the local hostname', async () => {
+    await runHook(
+      'session-start',
+      { session_id: 'sess-host2', ide: 'claude-code', metadata: { host: 'elsewhere' } },
+      { store },
+    );
+    const meta = JSON.parse(store.storage.getSession('sess-host2')?.metadata ?? '{}');
+    expect(meta.host).toBe('elsewhere');
+  });
+
   it('session-start creates a session and returns a (possibly empty) context', async () => {
     const r = await runHook(
       'session-start',

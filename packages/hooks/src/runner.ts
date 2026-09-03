@@ -1,3 +1,4 @@
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { loadSettings, resolveDataDir } from '@cavemem/config';
 import { MemoryStore } from '@cavemem/core';
@@ -35,6 +36,12 @@ export async function runHook(
     store = new MemoryStore({ dbPath, settings });
   }
   try {
+    // Stamp the originating machine. In remote mode the server sees many
+    // hosts sharing one store; in local mode it makes a later migration to
+    // remote mode attributable.
+    if (typeof input.metadata?.host !== 'string') {
+      input.metadata = { ...(input.metadata ?? {}), host: hostname() };
+    }
     let context: string | undefined;
     switch (name) {
       case 'session-start':
