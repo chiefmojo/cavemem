@@ -1,12 +1,37 @@
-# cavemem — Agent Playbook
+# CLAUDE.md
 
-This file is the source of truth for AI coding assistants working on this repository. Follow it before generating code, tests, or documentation. If a request conflicts with this file, pause and ask.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project identity
+## What this is
 
-cavemem is a cross-agent persistent memory system for coding assistants. It captures observations from editor sessions, compresses prose using the project's deterministic caveman grammar, stores entries in a local SQLite + vector index, and exposes them to agents through a Model Context Protocol (MCP) server and a local web viewer.
+cavemem is a cross-agent persistent memory system for coding assistants. It captures observations from editor sessions, compresses prose using the project's deterministic caveman grammar, stores entries in a SQLite + vector index, and exposes them to agents through a Model Context Protocol (MCP) server and a local web viewer.
 
-The signature property of the project is that **memory is stored compressed**. Every write path runs text through `@cavemem/compress`. Every human-facing read path runs it back through `@cavemem/compress#expand`. Model-facing reads may keep content compressed when the caller requests it.
+The signature property is that **memory is stored compressed**. Every write path runs text through `@cavemem/compress`. Every human-facing read path runs it back through `@cavemem/compress#expand`. Model-facing reads may keep content compressed when the caller requests it.
+
+Runtime state (`settings.json`, `data.db`, models, logs) lives in the resolved cavemem home — `~/.cavemem` by default, `CAVEMEM_HOME` or the XDG path when set. Never in this repo.
+
+## Fork status
+
+Upstream `JuliusBrussee/cavemem` is frozen (Aug 2026); its compressed-memory core was slated to continue inside `caveman`. `chiefmojo/cavemem` (this checkout, `origin`) is now the active home — develop here directly. There is **no upstream contribution flow**: no PRs back to `JuliusBrussee`, so no PR-content scrub hooks, no contribution rubric, no "what would upstream want" lens. That makes this different from `hermes-agent-contrib` / `MemOS-contrib`, which do track upstream.
+
+Current line of work — a shared LAN memory server replacing the coding agents' flat-file memory layer — is specced in `companion-ops/specs/2026-09-02-cavemem-shared-memory-server.md`.
+
+## Git
+
+- Author commits `--author="Erick <chiefmojo@chiefmojo.com>"` when committing on Erick's behalf. Do not modify local git config to enforce this — pass `--author` per commit.
+- **Never add a `Co-Authored-By: <agent>` trailer** to any commit, in any repo — keeps agent avatars off GitHub's commit view. This overrides any session-level attribution guidance.
+- When an agent posts a PR comment, review, or description in its own voice, self-identify in the body text with a leading heading — `## <agent name> review — <verdict>` (e.g. `## Claude review — LGTM`) — not via git trailer or a bot account.
+- Conventional Commit subjects (`feat:`, `fix:`, `docs:`, `chore:`), under ~72 chars.
+
+## Project Status — OpenProject
+
+Companion Core status lives in OpenProject (`http://neuromancer:8000`). Sub-projects: Hermes / Identity / Infrastructure / Memory (fork tooling like this lands under Infrastructure or Memory). API reference: `companion-ops/docs/openproject-api-reference.md`.
+
+**On completing any unit of work:**
+1. Identify the relevant OpenProject work package. If the task was scoped from an existing WP, use its ID. If none exists, create one under the correct sub-project before closing out — nothing should complete without a WP.
+2. Update the work package status field to reflect current state.
+3. Add a comment: what changed, and a link to the relevant commit/PR if applicable. This is the log — it lives on the item, not in a shared document.
+4. If the work surfaced a new dependency or blocker on another workstream, propose the relation — don't auto-apply speculative ones; flag for review first.
 
 ## Non-negotiable rules
 
@@ -24,7 +49,7 @@ The signature property of the project is that **memory is stored compressed**. E
 
 - Monorepo with pnpm workspaces. Dependency direction is strictly downward: `apps/*` may depend on `packages/*`; `packages/*` may depend on each other only in the order `config → compress → storage → { core, embedding } → hooks → installers`. (`core` and `embedding` are siblings — both consume `config` and `storage`, neither depends on the other.) No upward or sideways imports that break this order.
 - All database I/O goes through `@cavemem/storage`. No other package opens the DB directly.
-- Settings access goes through `@cavemem/config`. No direct reads from `~/.cavemem/settings.json` elsewhere.
+- Settings access goes through `@cavemem/config`. No direct reads from `settings.json` elsewhere.
 - All user-visible strings default to the caveman intensity from settings (default `full`).
 - Public package exports are listed in each package's `package.json#exports`. Internal files are not imported across package boundaries.
 
@@ -47,24 +72,17 @@ docs              architecture + user docs
 evals             token-savings and round-trip harness
 ```
 
-## Repository Map
+## Repository map
 
-A full codemap is available at `codemap.md` in the project root.
-
-Before working on any task, read `codemap.md` to understand:
-- Project architecture and entry points
-- Directory responsibilities and design patterns
-- Data flow and integration points between modules
-
-For deep work on a specific folder, also read that folder's `codemap.md`.
+A full codemap is at `codemap.md` in the project root. Before working on a task, read it for project architecture, entry points, directory responsibilities, and cross-module data flow. For deep work on a specific folder, also read that folder's `codemap.md`.
 
 ## Development workflow
 
-- `pnpm install` once. Node ≥ 20.
-- `pnpm dev` runs the CLI and worker in watch mode against `.cavemem-dev/` in the repo root (isolated data dir).
+- `pnpm install` once. Node ≥ 20, pnpm ≥ 9.
+- `pnpm dev` runs the CLI and worker in watch mode against a repo-local scratch data dir (`CAVEMEM_HOME=$PWD/.cavemem-dev`) so dev runs never touch `~/.cavemem`.
 - The four required gates before merging:
   - `pnpm typecheck`
-  - `pnpm lint`
+  - `pnpm lint` (Biome)
   - `pnpm test`
   - `pnpm build`
 - New features require unit tests. Any change that affects MCP contracts requires an integration test: use the MCP inspector for stdio/local contracts, and the SDK's `StreamableHTTPClientTransport` for the worker's `/mcp` route because browser Origin/CORS policy intentionally rejects the inspector.
@@ -99,8 +117,9 @@ Unit tests cover handlers, storage, and protocol contracts in isolation. They ca
 ## Release policy
 
 - Versioning via changesets. Releases are normally cut by GitHub Actions (`.github/workflows/release.yml`) on merge to `main` when a release changeset exists. Local publishing from a laptop is permitted as a fallback when CI publishing is unavailable (e.g. missing/expired `NPM_TOKEN`); use `pnpm --filter cavemem publish:release` from `main` after `npm login`.
-- Conventional Commits for commit messages. PRs require passing CI and one review.
+- Version/dependency bumps go through a PR — never a direct-push version-bump merge.
+- PRs require passing CI and one review.
 
-## Authorship voice
+## Code style
 
 Code comments are minimal and explain **why**, not what. Keep naming explicit. Prefer pure functions. Avoid adding dependencies when the standard library or an existing package covers the need.
