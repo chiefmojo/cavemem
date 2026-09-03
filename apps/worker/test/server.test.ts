@@ -292,6 +292,70 @@ describe('POST /api/hooks/:event', () => {
     const tl = store.timeline('h2');
     expect(tl).toHaveLength(1);
     expect(tl[0]?.content).toContain('/etc/hosts');
+    expect(tl[0]?.content).not.toBe('Please basically fix /etc/hosts');
+    expect(tl[0]?.content).not.toContain('basically');
+  });
+
+  it('runs post-tool-use, stop, and session-end handlers', async () => {
+    await apiReq('/api/hooks/session-start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h3', ide: 'codex' }),
+    });
+    const tool = await apiReq('/api/hooks/post-tool-use', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session_id: 'h3',
+        tool_name: 'Read',
+        tool_input: { path: '/tmp/input.txt' },
+        tool_response: 'contents',
+      }),
+    });
+    expect(tool.status).toBe(200);
+    expect(((await tool.json()) as { ok: boolean }).ok).toBe(true);
+    expect(store.timeline('h3')).toHaveLength(1);
+    expect(store.timeline('h3')[0]?.kind).toBe('tool_use');
+
+    const stop = await apiReq('/api/hooks/stop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h3', last_assistant_message: 'Fixed the bug.' }),
+    });
+    expect(stop.status).toBe(200);
+    expect(((await stop.json()) as { ok: boolean }).ok).toBe(true);
+    expect(store.storage.listSummaries('h3').filter((s) => s.scope === 'turn')).toHaveLength(1);
+
+    const end = await apiReq('/api/hooks/session-end', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h3' }),
+    });
+    expect(end.status).toBe(200);
+    expect(((await end.json()) as { ok: boolean }).ok).toBe(true);
+    expect(store.storage.listSummaries('h3').filter((s) => s.scope === 'session')).toHaveLength(1);
+    expect(store.storage.getSession('h3')?.ended_at).not.toBeNull();
+  });
+
+  it('returns a failed HookResult with HTTP 200 when a handler fails', async () => {
+    const brokenStore = new MemoryStore({ dbPath: join(dir, 'broken.db'), settings: defaultSettings });
+    const brokenApp = buildApp(brokenStore, { port: PORT, token: TOKEN });
+    brokenStore.close();
+    const res = await brokenApp.request('/api/hooks/session-start', {
+      method: 'POST',
+      headers: {
+        host: HOST,
+        authorization: `Bearer ${TOKEN}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ session_id: 'broken', ide: 'codex' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: expect.any(String),
+      ms: expect.any(Number),
+    });
   });
 
   it('400 on unknown event and on missing session_id', async () => {
