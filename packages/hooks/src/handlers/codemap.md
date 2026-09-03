@@ -2,11 +2,11 @@
 
 ## Responsibility
 
-One function per IDE lifecycle event, each taking `(store: MemoryStore, input: HookInput)` and doing exactly one write-shaped job through `MemoryStore`:
+One function per IDE lifecycle event, each taking `(store: MemoryStore, input: HookInput)` and doing exactly one write-shaped job through `MemoryStore`. Handlers are mode-agnostic: in remote mode `../runner.ts` POSTs the raw `HookInput` to the central worker instead of dispatching locally, and the worker runs these same handlers against its own injected store:
 
 | Handler | File | Writes | Returns |
 |---|---|---|---|
-| `sessionStart` | `session-start.ts` | `startSession` | prior-session context string |
+| `sessionStart` | `session-start.ts` | `startSession` (incl. session metadata) | prior-session context string |
 | `userPromptSubmit` | `user-prompt-submit.ts` | `addObservation(kind: 'user_prompt')` | `''` |
 | `postToolUse` | `post-tool-use.ts` | `addObservation(kind: 'tool_use')` | void |
 | `stop` | `stop.ts` | `addSummary(scope: 'turn')` | void |
@@ -14,7 +14,7 @@ One function per IDE lifecycle event, each taking `(store: MemoryStore, input: H
 
 ## Design
 
-- **`sessionStart` is idempotent** — Claude Code re-fires SessionStart on resume/clear/compact with the same `session_id`, so `store.startSession` must tolerate duplicates. Context injection happens only when `input.source === 'startup'` (on resume/clear/compact the agent already has its own context; a "Prior-session context" preface would be noisy and possibly stale). The fetch intentionally widens to `store.storage.listSessions(20)` before filtering by `cwd` and slicing to 3 — without the headroom a project that hasn't been the most recently used on the machine would routinely get zero hints (issue #39). Each hint attaches at most one summary via `store.storage.listSummaries`, joined under a `## Prior-session context` heading.
+- **`sessionStart` is idempotent** — Claude Code re-fires SessionStart on resume/clear/compact with the same `session_id`, so `store.startSession` must tolerate duplicates. It persists `input.metadata` into the session row (`metadata: input.metadata ?? null`) — by dispatch time `../runner.ts` has already stamped the originating machine's hostname into `metadata.host`, so sessions record where they were produced; this is what makes multi-machine (remote-mode) history distinguishable. Context injection happens only when `input.source === 'startup'` (on resume/clear/compact the agent already has its own context; a "Prior-session context" preface would be noisy and possibly stale). The fetch intentionally widens to `store.storage.listSessions(20)` before filtering by `cwd` and slicing to 3 — without the headroom a project that hasn't been the most recently used on the machine would routinely get zero hints (issue #39). Each hint attaches at most one summary via `store.storage.listSummaries`, joined under a `## Prior-session context` heading.
 - **`userPromptSubmit` deliberately returns `''`** — retrieval augmentation is driven through MCP, not this hook, so agents that don't use MCP still get a fast path. Its only job is persisting the prompt as a `user_prompt` observation.
 - **`postToolUse` is the defensive hot path.** Three gates before any write: (1) tool filtering via `capture.excludeTools` / `capture.includeTools` globs (`isToolExcluded`, `matchesGlob` from config); (2) privacy — `privacy.excludePatterns` is checked against dedicated path fields (`PATH_KEYS`: `file_path`, `path`, `notebook_path`) *and* a bounded whitespace-token scan (`PATH_LIKE_TOKEN_RE` over `MAX_SCAN_LEN` = 8000 chars) of the stringified input/output, so paths embedded in free-form strings like a Bash `command` are caught too (`candidatePaths` / `isPathExcluded`); excluded content returns silently with no log trace, per the privacy rule. (3) an empty body check. What's written is `"<tool> input=… output=…"` sliced to 4000 chars, with `stringifyShort` capping each side at 500 chars and `safeStringify` capping giant leaf strings *during* serialization (a multi-MB file payload must not pay full stringify cost only to be sliced after).
 - **`stop` reads `turn_summary ?? last_assistant_message`** (the same legacy/Claude-Code alias pattern as `HookInput`) and stores it as a turn-scope summary; empty/whitespace-only summaries are no-ops.
@@ -22,7 +22,7 @@ One function per IDE lifecycle event, each taking `(store: MemoryStore, input: H
 
 ## Flow
 
-`runHook` dispatch → handler → one or two synchronous `MemoryStore` calls → SQLite write inside the store (which routes all prose through `@cavemem/compress` before storage). Nothing here reads the DB except `sessionStart` (hints) and `sessionEnd` (rollup), both via `store.storage`.
+`runHook` dispatch → handler → one or two synchronous `MemoryStore` calls → SQLite write inside the store (which routes all prose through `@cavemem/compress` before storage). Nothing here reads the DB except `sessionStart` (hints) and `sessionEnd` (rollup), both via `store.storage`. Nothing here touches the network either — in remote mode the POST, spooling, and replay all happen in `../runner.ts` before (or instead of) any handler runs.
 
 ## Integration
 

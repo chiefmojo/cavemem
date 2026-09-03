@@ -16,7 +16,7 @@ A cross-agent persistent memory system for coding assistants. It captures observ
 ## Directory Map (Aggregated)
 | Directory | Responsibility Summary | Detailed Map |
 |-----------|------------------------|--------------|
-| `packages/config/` | Single authority for settings — zod `SettingsSchema`, portable `settings.json` load/save, `settingsDocs()`, home/data-dir resolution, path-glob matching. | [View Map](packages/config/codemap.md) |
+| `packages/config/` | Single authority for settings — zod `SettingsSchema` (incl. `remote`, `workerHost`, `workerAllowedHosts`), portable `settings.json` load/save, `settingsDocs()`, home/data-dir resolution + shared `worker-token` path, path-glob matching. | [View Map](packages/config/codemap.md) |
 | `packages/compress/` | Deterministic caveman-grammar compression engine — `compress`/`expand`, technical-token-preserving tokenizer, privacy scrubbers. | [View Map](packages/compress/codemap.md) |
 | `packages/storage/` | Sole SQLite owner — idempotent schema (WAL + FTS5 + sync triggers), dual backend, BM25 `searchFts`, embedding persistence. | [View Map](packages/storage/codemap.md) |
 | `packages/core/` | Domain layer — models, hybrid ranker, session IDs, and `MemoryStore`, the single enforced write path (redact → compress → persist). | [View Map](packages/core/codemap.md) |

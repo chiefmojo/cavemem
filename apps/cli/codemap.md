@@ -6,7 +6,7 @@ The published npm package `cavemem` — the user-facing binary. It is the only w
 
 Owns three distinct surfaces that all ship in one package:
 
-1. **The `cavemem` CLI** (`bin: ./dist/index.js`, package name `"cavemem"`): a commander-based command tree for installing/uninstalling IDE integrations, settings management (`config`), health checks (`doctor`, `status`), memory access (`search`, `compress`/`expand`, `export`/`import`, `reindex`), daemon lifecycle (`start`/`stop`/`restart`/`viewer`, `worker …`), and the internal `hook run` entrypoint that IDE shell stubs invoke.
+1. **The `cavemem` CLI** (`bin: ./dist/index.js`, package name `"cavemem"`): a commander-based command tree for installing/uninstalling IDE integrations, settings management (`config`), health checks (`doctor`, `status`), memory access (`search`, `compress`/`expand`, `export`/`import`, `reindex`), daemon lifecycle (`start`/`stop`/`restart`/`viewer`, `worker …`), and the internal `hook run` entrypoint that IDE shell stubs invoke. In **remote mode** (`settings.remote.url` set) the same binary acts as a thin client: `search`/`doctor`/`status`/`install` talk to the central server, while daemon/lifecycle/data commands (`worker`, `start`/`stop`/`restart`/`viewer`, `export`/`import`, `mcp`, `reindex`) refuse — there is no local store.
 2. **The OpenCode plugin bridge** (`dist/opencodeBridge.js`, second tsup entry from `src/opencode-bridge.ts`) — dynamically loaded by OpenCode to translate its event stream into cavemem hook calls.
 3. **The publish surface** (`scripts/prepack.mjs`, `scripts/pack-release.mjs`): stages and packages the tarball for both the changeset publish path and the legacy `publish:release` path.
 
@@ -26,6 +26,7 @@ Sub-packages are *not* runtime dependencies: `apps/mcp-server`, `apps/worker`, a
 - IDE hook path: `hooks-scripts/<event>.sh` (shipped via prepack) → `cavemem hook run <name> --ide <ide>` → stdin JSON → `@cavemem/hooks#runHook` → `MemoryStore.addObservation` (synchronous, compressed) + detach-spawned worker for embeddings.
 - Install path: `cavemem install --ide X` → `resolveCliPath()` → `installer.install(ctx)` writes IDE config (hooks + MCP registration) → `settings.ides[X] = true`.
 - Daemon path: `cavemem start` → pidfile `dataDir/worker.pid` → detached `node <cli> worker run` → `@cavemem/worker#start()` (viewer HTTP + embedding backfill loop); state surfaces back via `dataDir/worker.state.json` in `cavemem status`.
+- Remote mode: with `settings.remote.url` set, `search` GETs `<remote.url>/api/search` (bearer `remote.token`), `doctor`/`status` probe the server (`/healthz` + authenticated `/api/state`), and local-only commands exit 1 with "run `cavemem <cmd>` on the server" — the daemon, store, and viewer live on the server machine (`apps/worker`); `hook run` dispatches to `<remote.url>/api/hooks/<name>` inside `@cavemem/hooks#runHook`, so `hook.ts` needs no mode check.
 - OpenCode path: OpenCode loads `dist/opencodeBridge.js` → events/streams mapped to `cavemem hook run … --ide opencode` (fire-and-forget spawns); context priming reads the store directly.
 - Publish path: `changeset publish` → `prepublishOnly`/`prepack` (`scripts/prepack.mjs` stages README/LICENSE/hooks-scripts) → packed tarball. Fallback: `pnpm publish:release` → `scripts/pack-release.mjs` builds `release/` for `npm publish ./release`.
 

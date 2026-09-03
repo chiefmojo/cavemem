@@ -8,9 +8,9 @@ The two modules that make up the MCP server binary: `server.ts` owns transport, 
 
 ### server.ts
 
-- `buildServer(store, settings, deps?: ServerDeps)` — the single composition point. Every tool is a thin adapter: zod input schema → `MemoryStore` call → `JSON.stringify` into one text content block.
+- `buildServer(store, settings, deps?: ServerDeps)` — the single composition point. Every tool is a thin adapter: zod input schema → `MemoryStore` call → `JSON.stringify` into one text content block. `ServerDeps.embedder` (`Embedder | null | undefined`) lets a caller inject a pre-loaded embedder, `undefined` meaning "lazy-load on first `search`".
 - Progressive disclosure is structural, not advisory: `search`/`timeline` handlers project rows down to compact shapes (`{id, kind, ts}` for timeline; store-defined compact hits for search), while `get_observations(ids[])` is the only path to full content, with `expand` defaulting to `true` (human/agent-readable expanded caveman text).
-- `resolveEmbedder()` memoizes failure as `null` (logged to stderr) so repeated `search` calls never re-attempt a broken provider load.
+- `resolveEmbedder()` seeds its tri-state closure from `deps.embedder` (`undefined` = not yet attempted, `null` = unavailable, `Embedder` = ready) and memoizes failure as `null` (logged to stderr) so repeated `search` calls never re-attempt a broken provider load. The worker injects its own embedder so the `/mcp` route never lazily loads a second model.
 - `enrich` tool is conditionally registered (`settings.enrich.enabled`), creates one synthetic `enrich` session per process on first use, and scrubs `query`/`note` via `scrubMeta()` (`redactPrivate`, conditionally `redactSecrets`) because `MemoryStore` persists metadata verbatim.
 
 ### enrich.ts
@@ -28,5 +28,5 @@ The two modules that make up the MCP server binary: `server.ts` owns transport, 
 ## Integration
 
 - `server.ts` imports only from `@cavemem/*` packages (`config`, `core`, `embedding`, `compress`) plus the MCP SDK and `zod`; `enrich.ts` imports nothing project-internal (uses `settings`-derived numbers passed in via `EnrichConfig`).
-- Upstream callers: the installed `cavemem-mcp` bin (spawned by IDE integrations) and tests, which call `buildServer` directly with in-memory stores and `fetchImpl` stubs.
+- Upstream callers: the installed `cavemem-mcp` bin (spawned by IDE integrations), the worker's HTTP `/mcp` route (which calls `buildServer` with an injected embedder), and tests, which call `buildServer` directly with in-memory stores, `fetchImpl` stubs, and injected embedders.
 - The bundle entry is `src/server.ts` (see `package.json#scripts.build`, tsup ESM + dts), which is why `enrich.ts` needs no separate entrypoint guard.

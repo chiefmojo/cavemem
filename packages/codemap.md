@@ -18,10 +18,10 @@ Settings (`config`) → compression (`compress`) → persistence (`storage`) →
 ## Directory Map
 | Package | Responsibility Summary | Detailed Map |
 |---------|------------------------|--------------|
-| `config/` | Single authority for settings — zod `SettingsSchema`, portable `settings.json` load/save, `settingsDocs()`, home/data-dir resolution, path-glob matching. | [View Map](config/codemap.md) |
+| `config/` | Single authority for settings — zod `SettingsSchema` (incl. `remote`, `workerHost`, `workerAllowedHosts`), portable `settings.json` load/save, `settingsDocs()`, home/data-dir resolution + shared `worker-token` path, path-glob matching. | [View Map](config/codemap.md) |
 | `compress/` | Deterministic caveman-grammar compression engine — `compress`/`expand`, technical-token-preserving tokenizer, privacy scrubbers. | [View Map](compress/codemap.md) |
 | `storage/` | Sole SQLite owner — idempotent schema (WAL + FTS5 + sync triggers), dual backend, BM25 `searchFts`, embedding persistence. | [View Map](storage/codemap.md) |
 | `core/` | Domain layer — models, hybrid ranker, session IDs, and `MemoryStore`, the single enforced write path (redact → compress → persist). | [View Map](core/codemap.md) |
 | `embedding/` | Provider factory — `Embedder { model, dim, embed }` (local/Ollama/OpenAI/`none`), dim correctness before first use, musl-libc guard. | [View Map](embedding/codemap.md) |
-| `hooks/` | IDE lifecycle hook handlers + dispatcher + worker auto-spawn (150 ms p95 hot path, no network calls). | [View Map](hooks/codemap.md) |
+| `hooks/` | IDE lifecycle hook handlers + mode-aware dispatcher (local, injected, or remote POST with bounded spool/replay) + local-only worker auto-spawn (150 ms p95 hot path). | [View Map](hooks/codemap.md) |
 | `installers/` | Per-IDE detect/install/uninstall modules registering hooks + MCP entries across nine IDEs behind a uniform `Installer` contract. | [View Map](installers/codemap.md) |
