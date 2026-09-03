@@ -50,7 +50,9 @@ describe('SettingsSchema', () => {
 
   it('workerAllowedHosts entries must be host:port', () => {
     expect(() => SettingsSchema.parse({ workerAllowedHosts: ['neuromancer'] })).toThrow();
-    const ok = SettingsSchema.parse({ workerAllowedHosts: ['neuromancer:37777', '10.0.0.5:37777'] });
+    const ok = SettingsSchema.parse({
+      workerAllowedHosts: ['neuromancer:37777', '10.0.0.5:37777'],
+    });
     expect(ok.workerAllowedHosts).toHaveLength(2);
   });
 });

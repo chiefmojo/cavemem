@@ -12,6 +12,8 @@
 - **Worker auto-spawn invariants** (`src/auto-spawn.ts`, documented in-source): <2 ms when the worker is already running (one `existsSync` on `worker.pid` + one `process.kill(pid, 0)` probe); never blocks the hook (`spawn` with `detached: true`, `stdio: 'ignore'`, `windowsHide: true`, `child.unref()`); skipped when `CAVEMEM_NO_AUTOSTART` is set, when `settings.embedding.autoStart` is false, or when `settings.embedding.provider === 'none'`; silent no-op when the CLI path (`process.argv[1]`) cannot be resolved. Spawn failures are swallowed — the hook still succeeds and the next hook retries.
 - **Debounce-by-skip.** `ensureWorkerRunning` is called after every hook except `session-end` — if the worker is alive (pidfile + liveness probe), the call is a cheap no-op; if not, one detached spawn happens and every concurrent hook call re-checks the pidfile.
 
+Remote delivery lives in `src/remote.ts`, which POSTs a hook to the configured worker with its bearer token and timeout, and `src/spool.ts`, which caps, persists, and drains failed non-auth deliveries. The runner's remote branch adds host metadata, delegates to `postHook` instead of opening a local store, and attempts a bounded spool drain after successful delivery.
+
 ## Flow
 
 IDE event → shell stub (`hooks-scripts/`) → `cavemem hook run <name> --ide <ide>` (apps/cli) → `runHook`:

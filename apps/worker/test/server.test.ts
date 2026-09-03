@@ -266,7 +266,12 @@ describe('POST /api/hooks/:event', () => {
     const res = await apiReq('/api/hooks/session-start', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ session_id: 'h1', ide: 'claude-code', cwd: '/tmp', metadata: { host: 'wintermute' } }),
+      body: JSON.stringify({
+        session_id: 'h1',
+        ide: 'claude-code',
+        cwd: '/tmp',
+        metadata: { host: 'wintermute' },
+      }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; context?: string };
@@ -338,7 +343,10 @@ describe('POST /api/hooks/:event', () => {
   });
 
   it('returns a failed HookResult with HTTP 200 when a handler fails', async () => {
-    const brokenStore = new MemoryStore({ dbPath: join(dir, 'broken.db'), settings: defaultSettings });
+    const brokenStore = new MemoryStore({
+      dbPath: join(dir, 'broken.db'),
+      settings: defaultSettings,
+    });
     const brokenApp = buildApp(brokenStore, { port: PORT, token: TOKEN });
     brokenStore.close();
     const res = await brokenApp.request('/api/hooks/session-start', {

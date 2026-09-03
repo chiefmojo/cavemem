@@ -22,12 +22,7 @@ export const SettingsSchema = z
           'it does not move settings.json. Only an explicit value is persisted — the ' +
           'default is re-resolved on every load, keeping settings.json portable.',
       ),
-    workerPort: z
-      .number()
-      .int()
-      .positive()
-      .default(37777)
-      .describe('Port the worker binds to.'),
+    workerPort: z.number().int().positive().default(37777).describe('Port the worker binds to.'),
     workerHost: z
       .string()
       .default('127.0.0.1')

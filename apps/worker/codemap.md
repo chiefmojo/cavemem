@@ -13,6 +13,8 @@ The local HTTP daemon (`@cavemem/worker`, bin `cavemem-worker`): a **read-only v
 - **Server-rendered viewer** (`src/viewer.ts`): `renderIndex`/`renderSession` build static dark-themed HTML with `esc()` HTML-escaping of all interpolated data; the bearer token is injected into served HTML (`window.__CAVEMEM_TOKEN__`) so future client-side JS can call `/api/*` — the token is never sent in JSON responses.
 - **Ordered shutdown**: SIGTERM/SIGINT → remove `<dataDir>/worker.pid` → `loop.stop()` (awaits in-flight batch) → close HTTP servers → `store.close()`.
 
+In remote mode the worker is also the shared write and model-facing server: `POST /api/hooks/:event` runs hook handlers against its `MemoryStore`, while `ALL /mcp` serves stateless streamable HTTP MCP requests. `allowedHostSet` derives the Host/Origin allowlist from `workerAllowedHosts` with loopback defaults, and `start()` binds the listener to `settings.workerHost`.
+
 ## Flow
 
 1. `start()` → `loadSettings()` → `MemoryStore` on `<dataDir>/data.db` → write pid file.

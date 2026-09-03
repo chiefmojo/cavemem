@@ -48,6 +48,10 @@ cavemem viewer                     # open http://127.0.0.1:37777
 
 No daemon to start. Hooks write synchronously. A local worker auto-spawns in the background on the first hook to build embeddings and serve the viewer; it self-exits when idle (set `embedding.idleShutdownMs` to `0` to keep it running until killed). Disable auto-spawn — and with it the HTTP listener — with `cavemem config set embedding.autoStart false`.
 
+### Remote mode
+
+Remote mode lets one central worker own the memory store for agents on multiple machines. Setting `remote.url` makes client hooks POST to that worker and configures supported IDEs to use MCP over streamable HTTP; see [Remote mode](docs/remote.md) for settings, client behavior, and failure handling. See the [deployment runbook](deploy/README.md) to install and operate the shared server.
+
 ### IDE capability matrix
 
 "Query" means the MCP server can search memory captured elsewhere. "Capture" means this IDE's own sessions write new observations — without it, the DB never fills for that IDE no matter how healthy `cavemem status` otherwise looks (#58).

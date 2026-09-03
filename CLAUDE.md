@@ -15,10 +15,10 @@ The signature property of the project is that **memory is stored compressed**. E
 3. **Round-trip tests must pass.** Any change to the compressor, the lexicon, or the tokenizer requires `pnpm --filter @cavemem/compress test` green, including the technical-token preservation suite.
 4. **Progressive disclosure in MCP.** `search` and `timeline` return compact results (IDs + snippets). Full observation bodies are only returned by `get_observations(ids[])`. Do not bloat the compact shapes.
 5. **Hot-path hooks are fast.** Hook handlers in `packages/hooks` must complete under 150 ms p95. Summarization, embedding, and indexing are handed off to the worker. No network calls in hooks.
-6. **Privacy is enforced at the write boundary.** Content inside `<private>…</private>` tags is stripped. Paths matching `settings.excludePatterns` are never read. Neither appears in logs.
+6. **Privacy is enforced at the write boundary.** Content inside `<private>…</private>` tags is stripped. Paths matching `settings.excludePatterns` are never read. Neither appears in logs. The write boundary is the server's `MemoryStore`: in remote mode, raw hook payloads cross the LAN to the central worker before `excludePatterns` and `<private>` stripping apply (spec decision 4, 2026-09-02).
 7. **Local by default.** Default embedding provider is local (Transformers.js). Remote providers are opt-in via settings. Do not add default network calls.
 8. **No silent failures.** Hook and worker errors are logged as structured JSON; user-visible commands surface failures with a non-zero exit code and a short message.
-9. **No daemon on the write path.** Hooks write observations synchronously through `MemoryStore.addObservation` — never across a network or HTTP boundary. Hooks may *detach-spawn* the worker to kick off background embedding, but they must never wait on it. If the worker is down, writes still succeed; only the semantic-search side is degraded (BM25 keeps working).
+9. **No daemon on the local write path.** In local mode hooks write observations synchronously through `MemoryStore.addObservation` — never across a network or HTTP boundary. Hooks may *detach-spawn* the worker to kick off background embedding, but they must never wait on it. If the worker is down, writes still succeed; only the semantic-search side is degraded (BM25 keeps working). In remote mode (`settings.remote.url` set) hooks POST synchronously to the central worker's `/api/hooks/:event`, spool locally on failure, and never open a local store.
 
 ## Architectural rules
 
@@ -32,8 +32,8 @@ The signature property of the project is that **memory is stored compressed**. E
 
 ```
 apps/cli          user-facing binary
-apps/worker       local HTTP daemon: read-only viewer + embedding backfill loop
-apps/mcp-server   stdio MCP server
+apps/worker       local HTTP daemon: viewer, embedding backfill, remote-mode hook endpoint, MCP over streamable HTTP at /mcp
+apps/mcp-server   stdio MCP server; buildServer() is shared with the worker's /mcp route
 packages/config   settings schema, loader, defaults, settingsDocs()
 packages/compress compression engine + lexicon
 packages/storage  SQLite + FTS5 + vector adapter
@@ -76,6 +76,7 @@ Unit tests cover handlers, storage, and protocol contracts in isolation. They ca
 
 - `bash scripts/e2e-publish.sh` — covers the **changeset publish** path (CI default). Builds, packs (mirroring what `changeset publish` ships), installs into an isolated `.e2e/` prefix with an isolated `$HOME`, drives every Claude Code hook event with a realistic payload, exercises FTS search and the MCP server, then uninstalls. Self-cleans on success. Required to pass in CI before `changeset publish` runs.
 - `bash scripts/e2e-pack-release.sh` — covers the **`pnpm publish:release`** path (legacy bespoke flow that uses `apps/cli/scripts/pack-release.mjs` to write `apps/cli/release/`). Run this if you change `pack-release.mjs` or the `dependencies` block of `apps/cli/package.json`.
+- `bash scripts/e2e-remote.sh` — covers remote mode: server + client on one box through the packed artifact, all hook events, spool/drain, MCP over HTTP. Required alongside `e2e-publish.sh`.
 - The 15 numbered checks in `e2e-publish.sh` must stay green. If you change anything in `apps/cli/`, `packages/installers/`, the hook handler stdout/stderr contract, or the publish surface, re-run it locally before opening a PR.
 - Touching the tsup config, the `prepublishOnly` script, or the bin entrypoint guards (`isMainEntry()`) without re-running both scripts is a defect.
 
