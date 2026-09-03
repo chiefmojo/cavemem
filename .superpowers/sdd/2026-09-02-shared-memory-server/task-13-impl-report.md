@@ -9,6 +9,7 @@ Implemented Task 13 from `docs/superpowers/plans/2026-09-02-shared-memory-server
 - Design: `docs/superpowers/specs/2026-09-02-shared-memory-server-design.md`
 - Initial commit subject: `docs: remote mode, MCP transport, rules 6 and 9, changeset`
 - Round-one correction subject: `docs: reconcile remote mode guidance`
+- Round-two correction subject: `docs: qualify README local defaults`
 - Required author: `Erick <chiefmojo@chiefmojo.com>`
 
 The worktree did not contain an `AGENTS.md`; the supplied cavemem Agent Playbook and the repository's identical `CLAUDE.md` rules were treated as authoritative. No implementation behavior, deployment, live service, remote data, push, or PR operation was in scope.
@@ -76,3 +77,7 @@ All initial Task 13 gates were run from `/tmp/cavemem-shared-memory-server` afte
 The two e2e scripts used their own isolated homes/prefixes and packed artifact. No SSH, deployment, live service, live data, push, PR, or tracker operation was performed.
 
 After the round-one documentation corrections, documentation consistency checks and `git diff --check` passed; `pnpm lint` checked 149 files cleanly; all 11 participating `pnpm typecheck` projects passed; and all 349 tests in 32 files passed under `pnpm test`. The build and packed-artifact e2e scripts were not rerun because this correction changes documentation only: no executable source, build configuration, package dependency, installer implementation, or publish script changed.
+
+## Round-two review correction
+
+The updated review identified three remaining README statements that described local mode as universal. The lead now names the default local configuration and identifies remote embeddings, web enrichment, and remote mode as opt-in network features; the Local by default feature makes the same distinctions; and the installation paragraph is explicitly scoped to local mode. Stale-wording checks and `git diff --check` passed, and `pnpm lint` checked all 149 files with no findings. The first sandboxed lint launcher encountered `EAI_AGAIN` while resolving pnpm; its authorized rerun passed. This was a two-file documentation/evidence update only, so executable gates and packed-artifact e2es were unaffected.
