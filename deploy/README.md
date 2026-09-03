@@ -8,10 +8,15 @@ Design: `docs/superpowers/specs/2026-09-02-shared-memory-server-design.md`. Trac
    ```bash
    sudo useradd -m -s /bin/bash agentops
    ```
-2. As `agentops`, install Node ≥ 20 (nvm or distro package) and set an npm prefix:
+2. Install a system Node ≥ 20 (do not use nvm for this service) and, as
+   `agentops`, set an npm prefix:
    ```bash
    npm config set prefix ~/.local
+   env -i PATH=/usr/local/bin:/usr/bin:/bin node --version
    ```
+   The unit sets a fixed system `PATH` so the `cavemem` npm shim resolves the
+   system Node; confirm the reported version is at least 20. systemd does not
+   load shell profiles or nvm initialization.
 3. On a build box, from the fork's `main`:
    ```bash
    pnpm build && pnpm --filter cavemem stage-publish
@@ -47,6 +52,7 @@ Design: `docs/superpowers/specs/2026-09-02-shared-memory-server-design.md`. Trac
 8. Install and start the unit:
    ```bash
    sudo cp deploy/cavemem-worker.service /etc/systemd/system/
+   sudo systemd-analyze verify /etc/systemd/system/cavemem-worker.service
    sudo systemctl daemon-reload
    sudo systemctl enable --now cavemem-worker
    sudo journalctl -u cavemem-worker -n 20
@@ -71,4 +77,7 @@ Design: `docs/superpowers/specs/2026-09-02-shared-memory-server-design.md`. Trac
 
 - From wintermute: `cavemem search "<phrase from the migrated store>"` returns hits.
 - Start a Claude Code session, say something distinctive, end it. `cavemem search` for it from wintermute, then from a Codex MCP `search` call.
-- `sudo journalctl -u cavemem-worker -f` shows one line per hook POST when `logLevel` is `debug`.
+- `sudo systemctl is-active cavemem-worker` reports `active`; inspect the
+  startup journal with `sudo journalctl -u cavemem-worker -n 20` if it does
+  not. Hook POST telemetry is emitted by the client hook process, not the
+  worker service journal.
