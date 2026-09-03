@@ -83,6 +83,19 @@ describe('MCP over streamable HTTP', () => {
     const bodies = await client.callTool({ name: 'get_observations', arguments: { ids: [id] } });
     const bt = (bodies.content as Array<{ type: string; text: string }>)[0]?.text ?? '[]';
     expect(bt).toContain('cargo build --release');
+    const timeline = await client.callTool({
+      name: 'timeline',
+      arguments: { session_id: 's1' },
+    });
+    const tt = (timeline.content as Array<{ type: string; text: string }>)[0]?.text ?? '[]';
+    const rows = JSON.parse(tt) as Array<{ id: number; kind: string }>;
+    expect(rows.map(({ id: rowId, kind }) => ({ id: rowId, kind }))).toEqual([
+      { id, kind: 'note' },
+    ]);
+    const sessions = await client.callTool({ name: 'list_sessions', arguments: {} });
+    const st = (sessions.content as Array<{ type: string; text: string }>)[0]?.text ?? '[]';
+    const listed = JSON.parse(st) as Array<{ id: string; ide: string; cwd: string }>;
+    expect(listed).toEqual([expect.objectContaining({ id: 's1', ide: 'test', cwd: '/tmp' })]);
     await client.close();
   });
 
