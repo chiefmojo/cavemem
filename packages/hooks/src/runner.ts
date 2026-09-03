@@ -8,6 +8,8 @@ import { sessionEnd } from './handlers/session-end.js';
 import { sessionStart } from './handlers/session-start.js';
 import { stop } from './handlers/stop.js';
 import { userPromptSubmit } from './handlers/user-prompt-submit.js';
+import { RemoteAuthError, type RemoteTarget, postHook, remoteTarget } from './remote.js';
+import { appendSpool, drainSpool, spoolPath } from './spool.js';
 import type { HookInput, HookName, HookResult } from './types.js';
 
 export interface RunHookOptions {
@@ -24,6 +26,10 @@ export async function runHook(
   opts: RunHookOptions = {},
 ): Promise<HookResult> {
   const start = performance.now();
+  if (typeof input.metadata?.host !== 'string') {
+    input.metadata = { ...(input.metadata ?? {}), host: hostname() };
+  }
+
   const injected = opts.store !== undefined;
   let store: MemoryStore;
   let settingsForSpawn: ReturnType<typeof loadSettings> | undefined;
@@ -31,17 +37,13 @@ export async function runHook(
     store = opts.store;
   } else {
     const settings = loadSettings();
+    const target = remoteTarget(settings);
+    if (target) return runRemote(target, settings, name, input, start);
     settingsForSpawn = settings;
     const dbPath = join(resolveDataDir(settings.dataDir), 'data.db');
     store = new MemoryStore({ dbPath, settings });
   }
   try {
-    // Stamp the originating machine. In remote mode the server sees many
-    // hosts sharing one store; in local mode it makes a later migration to
-    // remote mode attributable.
-    if (typeof input.metadata?.host !== 'string') {
-      input.metadata = { ...(input.metadata ?? {}), host: hostname() };
-    }
     let context: string | undefined;
     switch (name) {
       case 'session-start':
@@ -77,5 +79,56 @@ export async function runHook(
     };
   } finally {
     if (!injected) store.close();
+  }
+}
+
+function logRemote(payload: Record<string, unknown>): void {
+  process.stderr.write(`${JSON.stringify({ remote: true, ...payload })}\n`);
+}
+
+/**
+ * Remote mode: never opens a local store, never throws. Failure other than
+ * auth spools the payload; any success drains a bounded slice of the spool.
+ */
+async function runRemote(
+  target: RemoteTarget,
+  settings: ReturnType<typeof loadSettings>,
+  name: HookName,
+  input: HookInput,
+  start: number,
+): Promise<HookResult> {
+  const ms = () => Math.round(performance.now() - start);
+  if (!target.token) {
+    logRemote({ hook: name, ok: false, reason: 'no-token', error: 'remote.token is not set' });
+    return { ok: true, ms: ms() };
+  }
+  const spool = spoolPath(settings);
+  try {
+    const result = await postHook(target, name, input);
+    const drained = await drainSpool(spool, (e) =>
+      postHook(target, e.name, e.input).then(() => {}),
+    );
+    if (drained > 0) logRemote({ hook: name, drained });
+    return { ...result, ms: ms() };
+  } catch (err) {
+    if (err instanceof RemoteAuthError) {
+      logRemote({ hook: name, ok: false, reason: 'auth', error: err.message });
+      return { ok: true, ms: ms() };
+    }
+    const error = err instanceof Error ? err.message : String(err);
+    try {
+      appendSpool(spool, { name, input, ts: Date.now() });
+      logRemote({ hook: name, ok: false, reason: 'unreachable', spooled: true, error });
+    } catch (spoolErr) {
+      logRemote({
+        hook: name,
+        ok: false,
+        reason: 'unreachable',
+        spooled: false,
+        error,
+        spoolError: spoolErr instanceof Error ? spoolErr.message : String(spoolErr),
+      });
+    }
+    return { ok: true, ms: ms() };
   }
 }

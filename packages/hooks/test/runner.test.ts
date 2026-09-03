@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultSettings } from '@cavemem/config';
 import { MemoryStore } from '@cavemem/core';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runHook } from '../src/index.js';
 
 let dir: string;
@@ -315,5 +315,88 @@ describe('runHook', () => {
     samples.sort((a, b) => a - b);
     const p95 = samples[Math.floor(samples.length * 0.95)] ?? 0;
     expect(p95).toBeLessThan(150);
+  });
+});
+
+describe('runHook — remote mode', () => {
+  let home: string;
+  let remoteRunHook: typeof runHook;
+  const origHome = process.env.CAVEMEM_HOME;
+
+  beforeEach(async () => {
+    home = mkdtempSync(join(tmpdir(), 'cavemem-remote-home-'));
+    mkdirSync(home, { recursive: true });
+    writeFileSync(
+      join(home, 'settings.json'),
+      JSON.stringify({
+        remote: { url: 'http://neuromancer:37777', token: 'tok', timeoutMs: 200 },
+        embedding: { provider: 'none' },
+      }),
+    );
+    process.env.CAVEMEM_HOME = home;
+    vi.resetModules();
+    ({ runHook: remoteRunHook } = await import('../src/index.js'));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (origHome === undefined) delete process.env.CAVEMEM_HOME;
+    else process.env.CAVEMEM_HOME = origHome;
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('POSTs instead of opening a local store and returns the server context', async () => {
+    const f = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, ms: 2, context: 'remote ctx' }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', f);
+    const r = await remoteRunHook('session-start', { session_id: 'r1', ide: 'claude-code' });
+    expect(r.ok).toBe(true);
+    expect(r.context).toBe('remote ctx');
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(home, 'data.db'))).toBe(false);
+  });
+
+  it('spools on network failure and still returns ok', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('ECONNREFUSED');
+      }),
+    );
+    const r = await remoteRunHook('user-prompt-submit', { session_id: 'r2', prompt: 'hi' });
+    expect(r.ok).toBe(true);
+    expect(existsSync(join(home, 'spool.jsonl'))).toBe(true);
+  });
+
+  it('does not spool on 401', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('Unauthorized', { status: 401 })),
+    );
+    const r = await remoteRunHook('user-prompt-submit', { session_id: 'r3', prompt: 'hi' });
+    expect(r.ok).toBe(true);
+    expect(existsSync(join(home, 'spool.jsonl'))).toBe(false);
+  });
+
+  it('drains the spool after a successful hook', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('down');
+      }),
+    );
+    await remoteRunHook('user-prompt-submit', { session_id: 'r4', prompt: 'first' });
+    const f = vi.fn(async () => new Response(JSON.stringify({ ok: true, ms: 1 }), { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    await remoteRunHook('stop', { session_id: 'r4', last_assistant_message: 'done' });
+    // one live POST + one replayed
+    expect(f).toHaveBeenCalledTimes(2);
+    expect(
+      existsSync(join(home, 'spool.jsonl'))
+        ? readFileSync(join(home, 'spool.jsonl'), 'utf8').trim()
+        : '',
+    ).toBe('');
   });
 });
