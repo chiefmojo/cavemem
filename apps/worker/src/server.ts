@@ -9,7 +9,7 @@ import { createEmbedder } from '@cavemem/embedding';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { type EmbedLoopHandle, startEmbedLoop, stateFilePath } from './embed-loop.js';
-import { bearerAuth, getOrCreateToken, hostAllowlist, originCheck } from './security.js';
+import { allowedHostSet, bearerAuth, getOrCreateToken, hostAllowlist, originCheck } from './security.js';
 import { renderIndex, renderSession } from './viewer.js';
 
 export interface BuildAppOptions {
@@ -17,6 +17,8 @@ export interface BuildAppOptions {
   port: number;
   /** Bearer token required on /api/*; also injected into served HTML. */
   token: string;
+  /** Extra host:port values accepted in Host/Origin (settings.workerAllowedHosts). */
+  allowedHosts?: string[];
   loop?: EmbedLoopHandle | undefined;
 }
 
@@ -27,8 +29,9 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
   // Host/Origin checks apply to every route (kills DNS rebinding + CSRF from
   // browser pages); the bearer token is scoped to /api/* only so the plain
   // HTML pages keep loading with zero user friction.
-  app.use('*', hostAllowlist(port));
-  app.use('*', originCheck(port));
+  const allowed = allowedHostSet(port, opts.allowedHosts ?? []);
+  app.use('*', hostAllowlist(allowed));
+  app.use('*', originCheck(allowed));
   app.use('*', async (_c, next) => {
     loop?.touch();
     await next();
@@ -165,11 +168,23 @@ export async function start(): Promise<void> {
   }
 
   const token = getOrCreateToken(settings);
-  const app = buildApp(store, { port: settings.workerPort, token, loop });
-  servers.push(serve({ fetch: app.fetch, port: settings.workerPort, hostname: '127.0.0.1' }));
-  process.stderr.write(
-    `[cavemem worker] listening on http://127.0.0.1:${settings.workerPort} (pid ${process.pid})\n`,
+  const app = buildApp(store, {
+    port: settings.workerPort,
+    token,
+    allowedHosts: settings.workerAllowedHosts,
+    loop,
+  });
+  servers.push(
+    serve({ fetch: app.fetch, port: settings.workerPort, hostname: settings.workerHost }),
   );
+  process.stderr.write(
+    `[cavemem worker] listening on http://${settings.workerHost}:${settings.workerPort} (pid ${process.pid})\n`,
+  );
+  if (settings.workerHost !== '127.0.0.1' && settings.workerAllowedHosts.length === 0) {
+    process.stderr.write(
+      '[cavemem worker] warning: bound off loopback with empty workerAllowedHosts — every non-loopback request will be rejected with 403\n',
+    );
+  }
 }
 
 if (isMainEntry()) {

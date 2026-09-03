@@ -6,9 +6,11 @@ import { resolveDataDir } from '@cavemem/config';
 import type { MiddlewareHandler } from 'hono';
 
 /**
- * The worker binds to 127.0.0.1 only, but that alone doesn't stop (a) a
- * malicious web page doing a CSRF/DNS-rebinding fetch to 127.0.0.1:<port>,
- * or (b) another local user/process on the same machine. Three layers:
+ * The worker binds to 127.0.0.1 by default; remote mode binds 0.0.0.0 and
+ * relies on the same three layers with `workerAllowedHosts` widening layer 1
+ * and 2. That alone doesn't stop (a) a malicious web page doing a
+ * CSRF/DNS-rebinding fetch to 127.0.0.1:<port>, or (b) another local
+ * user/process on the same machine. Three layers:
  *   1. Host header allowlist — kills DNS rebinding.
  *   2. Origin header check — kills browser-page CSRF (no CORS headers added).
  *   3. Bearer token on /api/* — kills same-origin-but-unauthenticated access.
@@ -38,24 +40,39 @@ export function getOrCreateToken(settings: Settings): string {
   return token;
 }
 
-function isAllowedHost(header: string | undefined, port: number): boolean {
-  return header === `127.0.0.1:${port}` || header === `localhost:${port}`;
+/**
+ * Loopback is always accepted so on-box tooling keeps working; `extra`
+ * (settings.workerAllowedHosts) adds the names LAN clients will use. The
+ * union is the whole trust boundary once workerHost is 0.0.0.0 — the bearer
+ * token still gates /api/* and /mcp, but Host/Origin are what stop DNS
+ * rebinding and browser CSRF.
+ */
+export function allowedHostSet(port: number, extra: string[]): Set<string> {
+  return new Set([`127.0.0.1:${port}`, `localhost:${port}`, ...extra]);
 }
 
-export function hostAllowlist(port: number): MiddlewareHandler {
+export function hostAllowlist(allowed: Set<string>): MiddlewareHandler {
   return async (c, next) => {
-    if (!isAllowedHost(c.req.header('host'), port)) {
+    const host = c.req.header('host');
+    if (!host || !allowed.has(host)) {
       return c.text('Forbidden', 403);
     }
     await next();
   };
 }
 
-export function originCheck(port: number): MiddlewareHandler {
+export function originCheck(allowed: Set<string>): MiddlewareHandler {
   return async (c, next) => {
     const origin = c.req.header('origin');
-    if (origin && origin !== `http://127.0.0.1:${port}` && origin !== `http://localhost:${port}`) {
-      return c.text('Forbidden', 403);
+    if (origin) {
+      let ok = false;
+      for (const h of allowed) {
+        if (origin === `http://${h}`) {
+          ok = true;
+          break;
+        }
+      }
+      if (!ok) return c.text('Forbidden', 403);
     }
     await next();
   };

@@ -222,3 +222,32 @@ describe('worker token file', () => {
     expect(second).toBe(first);
   });
 });
+
+describe('worker allowlist', () => {
+  it('rejects a LAN Host header when no allowlist is configured', async () => {
+    const res = await app.request('/healthz', { headers: { host: 'neuromancer:37777' } });
+    expect(res.status).toBe(403);
+  });
+
+  it('accepts a configured LAN Host header and still accepts loopback', async () => {
+    const lan = buildApp(store, { port: PORT, token: TOKEN, allowedHosts: ['neuromancer:37777'] });
+    const a = await lan.request('/healthz', { headers: { host: 'neuromancer:37777' } });
+    expect(a.status).toBe(200);
+    const b = await lan.request('/healthz', { headers: { host: HOST } });
+    expect(b.status).toBe(200);
+    const c = await lan.request('/healthz', { headers: { host: 'other:37777' } });
+    expect(c.status).toBe(403);
+  });
+
+  it('accepts an Origin matching an allowlisted host and rejects others', async () => {
+    const lan = buildApp(store, { port: PORT, token: TOKEN, allowedHosts: ['neuromancer:37777'] });
+    const ok = await lan.request('/healthz', {
+      headers: { host: 'neuromancer:37777', origin: 'http://neuromancer:37777' },
+    });
+    expect(ok.status).toBe(200);
+    const bad = await lan.request('/healthz', {
+      headers: { host: 'neuromancer:37777', origin: 'http://evil.example' },
+    });
+    expect(bad.status).toBe(403);
+  });
+});
