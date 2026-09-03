@@ -1,12 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadSettings, resolveDataDir, settingsPath } from '@cavemem/config';
-import { remoteTarget, spoolDepth, spoolPath } from '@cavemem/hooks';
+import { spoolDepth, spoolPath } from '@cavemem/hooks';
 import { type IdeName, installers } from '@cavemem/installers';
 import { Storage } from '@cavemem/storage';
 import type { Command } from 'commander';
 import kleur from 'kleur';
-import { probeRemote } from '../util/remote.js';
+import { checkedRemoteTarget, probeRemote } from '../util/remote.js';
 
 interface WorkerState {
   provider?: string;
@@ -80,7 +80,7 @@ export function registerStatusCommand(program: Command): void {
       );
       process.stdout.write(`data dir:   ${dir}\n`);
 
-      const target = remoteTarget(settings);
+      const target = checkedRemoteTarget(settings);
       if (target) {
         const probe = await probeRemote(target);
         process.stdout.write(`mode:       ${kleur.cyan('remote')} ${target.url}\n`);

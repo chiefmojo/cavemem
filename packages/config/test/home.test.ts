@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -178,6 +178,17 @@ describe('saveSettings dataDir portability', () => {
     saveSettings(SettingsSchema.parse({ dataDir: explicitDir }));
     const raw = JSON.parse(readFileSync(settingsPath(), 'utf8')) as Record<string, unknown>;
     expect(raw.dataDir).toBe(explicitDir);
+  });
+
+  it('writes settings containing a remote bearer token with mode 0600', async () => {
+    const { SettingsSchema } = await import('../src/schema.js');
+    const { saveSettings, settingsPath } = await import('../src/loader.js');
+
+    saveSettings(
+      SettingsSchema.parse({ remote: { url: 'http://worker:37777', token: 'secret-token' } }),
+    );
+
+    expect(statSync(settingsPath()).mode & 0o777).toBe(0o600);
   });
 
   it('setting CAVEMEM_HOME after first install moves settingsPath and dataDir together', async () => {

@@ -1,12 +1,12 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadSettings, resolveDataDir, settingsPath } from '@cavemem/config';
-import { remoteTarget, spoolDepth, spoolPath } from '@cavemem/hooks';
+import { spoolDepth, spoolPath } from '@cavemem/hooks';
 import { CODEX_TOKEN_ENV, checkWindowsSh } from '@cavemem/installers';
 import { Storage } from '@cavemem/storage';
 import type { Command } from 'commander';
 import kleur from 'kleur';
-import { probeRemote } from '../util/remote.js';
+import { checkedRemoteTarget, probeRemote } from '../util/remote.js';
 
 export function registerDoctorCommand(program: Command): void {
   program
@@ -20,7 +20,7 @@ export function registerDoctorCommand(program: Command): void {
       const settings = loadSettings();
       const dir = resolveDataDir(settings.dataDir);
       process.stdout.write(`dataDir:  ${dir}\n`);
-      const target = remoteTarget(settings);
+      const target = checkedRemoteTarget(settings);
       if (target) {
         process.stdout.write(`mode:     remote ${target.url}\n`);
         process.stdout.write(

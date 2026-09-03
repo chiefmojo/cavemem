@@ -26,6 +26,7 @@ describe('remote CLI requests', () => {
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(String(url)).toBe('http://neuromancer:37777/api/search?q=spaces+%26+symbols&limit=7');
     expect(init?.headers).toEqual({ authorization: 'Bearer test-token' });
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('probes unauthenticated health before authenticated state', async () => {

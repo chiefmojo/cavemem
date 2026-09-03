@@ -1,5 +1,16 @@
+import type { Settings } from '@cavemem/config';
 import type { SearchResult } from '@cavemem/core';
-import type { RemoteTarget } from '@cavemem/hooks';
+import { type RemoteTarget, remoteTarget } from '@cavemem/hooks';
+
+export function checkedRemoteTarget(settings: Settings): RemoteTarget | null {
+  try {
+    return remoteTarget(settings);
+  } catch (err) {
+    throw new Error(
+      `Invalid remote configuration: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
 
 function headers(target: RemoteTarget): Record<string, string> {
   return { authorization: `Bearer ${target.token ?? ''}` };
@@ -15,7 +26,7 @@ export async function remoteSearch(
   u.searchParams.set('limit', String(limit));
   const res = await fetch(u, {
     headers: headers(target),
-    signal: AbortSignal.timeout(target.timeoutMs * 4),
+    signal: AbortSignal.timeout(target.timeoutMs),
   });
   if (!res.ok) throw new Error(`remote search failed: ${res.status}`);
   return (await res.json()) as SearchResult[];

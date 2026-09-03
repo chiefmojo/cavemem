@@ -7,10 +7,10 @@ import {
   saveSettings,
   settingsPath,
 } from '@cavemem/config';
-import { remoteTarget } from '@cavemem/hooks';
 import { type IdeName, checkWindowsSh, getInstaller, installers } from '@cavemem/installers';
 import type { Command } from 'commander';
 import kleur from 'kleur';
+import { checkedRemoteTarget } from '../util/remote.js';
 import { resolveCliPath } from '../util/resolve.js';
 
 // Hooks run through Claude Code's own `sh -c` wrapper on Windows (#56).
@@ -37,7 +37,7 @@ export function registerInstallCommand(program: Command): void {
         process.stdout.write(`${kleur.dim('wrote')} ${path}\n`);
       }
       const settings = loadSettings();
-      const target = remoteTarget(settings);
+      const target = checkedRemoteTarget(settings);
       if (target && !target.token) {
         process.stderr.write(
           `${kleur.red('remote.url is set but remote.token is empty')} — copy the server's worker-token into settings first\n`,

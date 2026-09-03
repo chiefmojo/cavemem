@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Settings } from '@cavemem/config';
@@ -83,7 +83,9 @@ export function bearerAuth(token: string): MiddlewareHandler {
     const header = c.req.header('authorization');
     const bearer = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
     const supplied = bearer ?? c.req.header('x-cavemem-token');
-    if (supplied !== token) {
+    const actual = Buffer.from(token);
+    const candidate = Buffer.from(supplied ?? '');
+    if (actual.length !== candidate.length || !timingSafeEqual(actual, candidate)) {
       return c.text('Unauthorized', 401);
     }
     await next();

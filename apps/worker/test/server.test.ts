@@ -93,7 +93,7 @@ describe('worker HTTP', () => {
 
   it('GET / renders the session index HTML', async () => {
     seed();
-    const res = await req('/');
+    const res = await apiReq('/');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type') ?? '').toMatch(/text\/html/);
     const body = await res.text();
@@ -102,14 +102,14 @@ describe('worker HTTP', () => {
 
   it('GET /sessions/:id renders observation HTML', async () => {
     seed();
-    const res = await req('/sessions/s1');
+    const res = await apiReq('/sessions/s1');
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('/etc/caveman.conf');
   });
 
   it('GET /sessions/:unknown returns 404', async () => {
-    const res = await req('/sessions/does-not-exist');
+    const res = await apiReq('/sessions/does-not-exist');
     expect(res.status).toBe(404);
   });
 
@@ -173,22 +173,22 @@ describe('worker HTTP', () => {
       expect(res.status).toBe(200);
     });
 
-    it('does not require a token on non-API HTML routes', async () => {
+    it('rejects unauthenticated HTML routes', async () => {
       const res = await req('/');
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(401);
     });
   });
 
   describe('viewer HTML token injection', () => {
     it('embeds the token as window.__CAVEMEM_TOKEN__ on the index page', async () => {
-      const res = await req('/');
+      const res = await apiReq('/');
       const body = await res.text();
       expect(body).toContain(`window.__CAVEMEM_TOKEN__=${JSON.stringify(TOKEN)}`);
     });
 
     it('embeds the token on a session page', async () => {
       seed();
-      const res = await req('/sessions/s1');
+      const res = await apiReq('/sessions/s1');
       const body = await res.text();
       expect(body).toContain(`window.__CAVEMEM_TOKEN__=${JSON.stringify(TOKEN)}`);
     });

@@ -11,6 +11,7 @@ import { buildServer } from '@cavemem/mcp-server';
 import { serve } from '@hono/node-server';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { type EmbedLoopHandle, startEmbedLoop, stateFilePath } from './embed-loop.js';
 import {
   allowedHostSet,
@@ -46,8 +47,8 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
   const { port, token, loop } = opts;
 
   // Host/Origin checks apply to every route (kills DNS rebinding + CSRF from
-  // browser pages); the bearer token is scoped to /api/* only so the plain
-  // HTML pages keep loading with zero user friction.
+  // browser pages). Every route except healthz requires the bearer because a
+  // LAN worker's viewer renders plaintext memory.
   const allowed = allowedHostSet(port, opts.allowedHosts ?? []);
   app.use('*', hostAllowlist(allowed));
   app.use('*', originCheck(allowed));
@@ -55,8 +56,10 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
     loop?.touch();
     await next();
   });
-  app.use('/api/*', bearerAuth(token));
-  app.use('/mcp', bearerAuth(token));
+  app.use('*', async (c, next) => {
+    if (c.req.path === '/healthz') return next();
+    return bearerAuth(token)(c, next);
+  });
 
   // Stateless streamable HTTP: one server + transport per request, as the SDK
   // requires when sessionIdGenerator is undefined. Tool registration is five
@@ -100,7 +103,7 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
   // Remote-mode write path. The client ships the raw IDE payload; the same
   // handlers that run in local mode run here against the worker's store, so
   // redaction, exclusion, and compression stay in one place (spec decision 4).
-  app.post('/api/hooks/:event', async (c) => {
+  app.post('/api/hooks/:event', bodyLimit({ maxSize: 1_048_576 }), async (c) => {
     const event = c.req.param('event');
     if (!HOOK_NAMES.has(event)) {
       return c.json({ error: `unknown hook event: ${event}` }, 400);
