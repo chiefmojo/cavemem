@@ -6,6 +6,7 @@ import { expand } from '@cavemem/compress';
 import { type Settings, loadSettings, resolveDataDir } from '@cavemem/config';
 import { MemoryStore } from '@cavemem/core';
 import { createEmbedder } from '@cavemem/embedding';
+import { type HookInput, type HookName, runHook } from '@cavemem/hooks';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { type EmbedLoopHandle, startEmbedLoop, stateFilePath } from './embed-loop.js';
@@ -21,6 +22,14 @@ export interface BuildAppOptions {
   allowedHosts?: string[];
   loop?: EmbedLoopHandle | undefined;
 }
+
+const HOOK_NAMES: ReadonlySet<string> = new Set<HookName>([
+  'session-start',
+  'user-prompt-submit',
+  'post-tool-use',
+  'stop',
+  'session-end',
+]);
 
 export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
   const app = new Hono();
@@ -61,6 +70,27 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
     const q = c.req.query('q') ?? '';
     const limit = Number(c.req.query('limit') ?? 10);
     return c.json(await store.search(q, limit));
+  });
+
+  // Remote-mode write path. The client ships the raw IDE payload; the same
+  // handlers that run in local mode run here against the worker's store, so
+  // redaction, exclusion, and compression stay in one place (spec decision 4).
+  app.post('/api/hooks/:event', async (c) => {
+    const event = c.req.param('event');
+    if (!HOOK_NAMES.has(event)) {
+      return c.json({ error: `unknown hook event: ${event}` }, 400);
+    }
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'body must be JSON' }, 400);
+    }
+    if (!body || typeof body !== 'object' || typeof (body as HookInput).session_id !== 'string') {
+      return c.json({ error: 'session_id is required' }, 400);
+    }
+    const result = await runHook(event as HookName, body as HookInput, { store });
+    return c.json(result);
   });
 
   app.get('/', (c) => c.html(renderIndex(store.storage.listSessions(50), token)));

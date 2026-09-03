@@ -251,3 +251,67 @@ describe('worker allowlist', () => {
     expect(bad.status).toBe(403);
   });
 });
+
+describe('POST /api/hooks/:event', () => {
+  it('rejects without bearer', async () => {
+    const res = await req('/api/hooks/session-start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h1' }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('runs session-start and returns a HookResult', async () => {
+    const res = await apiReq('/api/hooks/session-start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h1', ide: 'claude-code', cwd: '/tmp', metadata: { host: 'wintermute' } }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; context?: string };
+    expect(body.ok).toBe(true);
+    expect(typeof body.context).toBe('string');
+    const row = store.storage.getSession('h1');
+    expect(row?.ide).toBe('claude-code');
+    expect(JSON.parse(row?.metadata ?? '{}').host).toBe('wintermute');
+  });
+
+  it('user-prompt-submit lands a compressed observation', async () => {
+    await apiReq('/api/hooks/session-start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h2', ide: 'codex' }),
+    });
+    const res = await apiReq('/api/hooks/user-prompt-submit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session_id: 'h2', prompt: 'Please basically fix /etc/hosts' }),
+    });
+    expect(res.status).toBe(200);
+    const tl = store.timeline('h2');
+    expect(tl).toHaveLength(1);
+    expect(tl[0]?.content).toContain('/etc/hosts');
+  });
+
+  it('400 on unknown event and on missing session_id', async () => {
+    const a = await apiReq('/api/hooks/not-a-hook', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"session_id":"x"}',
+    });
+    expect(a.status).toBe(400);
+    const b = await apiReq('/api/hooks/stop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"last_assistant_message":"hi"}',
+    });
+    expect(b.status).toBe(400);
+    const c = await apiReq('/api/hooks/stop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not json',
+    });
+    expect(c.status).toBe(400);
+  });
+});
