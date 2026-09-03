@@ -41,7 +41,7 @@ export function registerDoctorCommand(program: Command): void {
         const pid = join(dir, 'worker.pid');
         if (existsSync(pid)) {
           process.stdout.write(
-            `worker:   ${kleur.yellow('local pidfile present — run `cavemem stop` before relying on remote mode')}\n`,
+            `worker:   ${kleur.yellow(`local pidfile present — remove remote.url from ${path}, run \`cavemem stop\`, then restore remote.url`)}\n`,
           );
         }
         process.stdout.write(`spool:    ${spoolDepth(spoolPath(settings))} queued\n`);

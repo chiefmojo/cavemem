@@ -7,6 +7,7 @@ import {
   saveSettings,
   settingsPath,
 } from '@cavemem/config';
+import { remoteTarget } from '@cavemem/hooks';
 import { type IdeName, checkWindowsSh, getInstaller, installers } from '@cavemem/installers';
 import type { Command } from 'commander';
 import kleur from 'kleur';
@@ -36,7 +37,8 @@ export function registerInstallCommand(program: Command): void {
         process.stdout.write(`${kleur.dim('wrote')} ${path}\n`);
       }
       const settings = loadSettings();
-      if (settings.remote.url && !settings.remote.token) {
+      const target = remoteTarget(settings);
+      if (target && !target.token) {
         process.stderr.write(
           `${kleur.red('remote.url is set but remote.token is empty')} — copy the server's worker-token into settings first\n`,
         );
@@ -48,9 +50,7 @@ export function registerInstallCommand(program: Command): void {
         cliPath: resolveCliPath(),
         nodeBin: process.execPath,
         dataDir: resolveDataDir(settings.dataDir),
-        ...(settings.remote.url && settings.remote.token
-          ? { remote: { url: settings.remote.url, token: settings.remote.token } }
-          : {}),
+        ...(target?.token ? { remote: { url: target.url, token: target.token } } : {}),
       };
       const installer = getInstaller(name);
       const msgs = await installer.install(ctx);
@@ -83,7 +83,11 @@ export function registerInstallCommand(program: Command): void {
       process.stdout.write(
         `  ${kleur.cyan('cavemem status')}        show wiring + embedding backfill\n`,
       );
-      process.stdout.write(`  ${kleur.cyan('cavemem viewer')}        open the memory viewer\n`);
+      process.stdout.write(
+        ctx.remote
+          ? `  ${kleur.cyan(ctx.remote.url)}        open the remote memory viewer\n`
+          : `  ${kleur.cyan('cavemem viewer')}        open the memory viewer\n`,
+      );
       process.stdout.write(
         `  ${kleur.cyan('cavemem search "…"')}    query your memory from the terminal\n`,
       );
