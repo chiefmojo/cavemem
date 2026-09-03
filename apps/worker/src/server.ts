@@ -4,13 +4,21 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { expand } from '@cavemem/compress';
 import { type Settings, loadSettings, resolveDataDir } from '@cavemem/config';
-import { MemoryStore } from '@cavemem/core';
+import { type Embedder, MemoryStore } from '@cavemem/core';
 import { createEmbedder } from '@cavemem/embedding';
 import { type HookInput, type HookName, runHook } from '@cavemem/hooks';
+import { buildServer } from '@cavemem/mcp-server';
 import { serve } from '@hono/node-server';
+import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { Hono } from 'hono';
 import { type EmbedLoopHandle, startEmbedLoop, stateFilePath } from './embed-loop.js';
-import { allowedHostSet, bearerAuth, getOrCreateToken, hostAllowlist, originCheck } from './security.js';
+import {
+  allowedHostSet,
+  bearerAuth,
+  getOrCreateToken,
+  hostAllowlist,
+  originCheck,
+} from './security.js';
 import { renderIndex, renderSession } from './viewer.js';
 
 export interface BuildAppOptions {
@@ -20,6 +28,8 @@ export interface BuildAppOptions {
   token: string;
   /** Extra host:port values accepted in Host/Origin (settings.workerAllowedHosts). */
   allowedHosts?: string[];
+  /** Pre-loaded embedder shared with /mcp; null when provider=none or load failed. */
+  embedder?: Embedder | null;
   loop?: EmbedLoopHandle | undefined;
 }
 
@@ -46,6 +56,21 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
     await next();
   });
   app.use('/api/*', bearerAuth(token));
+  app.use('/mcp', bearerAuth(token));
+
+  // Stateless streamable HTTP: one server + transport per request, as the SDK
+  // requires when sessionIdGenerator is undefined. Tool registration is five
+  // calls, so the per-request cost is negligible. Real MCP clients send no
+  // Origin header; the shared originCheck still applies so a browser page
+  // cannot reach this route (DNS rebinding).
+  app.all('/mcp', async (c) => {
+    const mcp = buildServer(store, store.settings, { embedder: opts.embedder ?? null });
+    // Omitting the optional generator selects stateless mode. SDK 1.29's
+    // declaration rejects an explicit `undefined` with exactOptionalPropertyTypes.
+    const transport = new WebStandardStreamableHTTPServerTransport({});
+    await mcp.connect(transport);
+    return transport.handleRequest(c.req.raw);
+  });
 
   app.get('/healthz', (c) => c.json({ ok: true }));
 
@@ -153,7 +178,7 @@ export async function start(): Promise<void> {
 
   // Build embedder if provider != 'none'. Model load runs in the worker
   // process only — hooks never wait for it.
-  let embedder = null;
+  let embedder: Embedder | null = null;
   try {
     embedder = await createEmbedder(settings, {
       log: (line) => process.stderr.write(`${line}\n`),
@@ -202,6 +227,7 @@ export async function start(): Promise<void> {
     port: settings.workerPort,
     token,
     allowedHosts: settings.workerAllowedHosts,
+    embedder,
     loop,
   });
   servers.push(
