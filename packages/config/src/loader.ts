@@ -1,10 +1,10 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { defaultSettings } from './defaults.js';
-import { resolveCavememHome, resolveDataDir } from './home.js';
+import { resolveCavememHome, resolveDataDir, workerTokenPath } from './home.js';
 import { type Settings, SettingsSchema } from './schema.js';
 
-export { resolveDataDir } from './home.js';
+export { resolveDataDir, workerTokenPath } from './home.js';
 
 export function settingsPath(dataDir?: string): string {
   const dir = resolveDataDir(dataDir ?? resolveCavememHome());

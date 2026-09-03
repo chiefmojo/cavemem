@@ -85,7 +85,12 @@ export function registerInstallCommand(program: Command): void {
       );
       process.stdout.write(
         ctx.remote
-          ? `  ${kleur.cyan(ctx.remote.url)}        open the remote memory viewer\n`
+          ? // Viewer HTML now requires the cookie handshake (server.ts
+            // viewerAuth) — the bare URL 401s. Not printing `?token=` here:
+            // 6b95858 established that install output must never carry a
+            // remote token, so the URL is bare and the token comes from
+            // wherever the user already sourced it (settings.json / doctor).
+            `  ${kleur.cyan(ctx.remote.url)}        open the remote memory viewer (append ?token=<remote.token>)\n`
           : `  ${kleur.cyan('cavemem viewer')}        open the memory viewer\n`,
       );
       process.stdout.write(

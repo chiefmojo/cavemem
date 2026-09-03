@@ -193,6 +193,46 @@ describe('worker HTTP', () => {
       expect(body).toContain(`window.__CAVEMEM_TOKEN__=${JSON.stringify(TOKEN)}`);
     });
   });
+
+  // A browser top-level navigation can only send cookies, not an
+  // Authorization header — `cavemem viewer` bootstraps the session with a
+  // one-time `?token=` query param that trades for a cookie (viewerAuth).
+  describe('viewer cookie handshake', () => {
+    it('a valid ?token= sets a cookie and redirects with the token stripped', async () => {
+      const res = await app.request(`/?token=${TOKEN}`, { headers: { host: HOST } });
+      expect(res.status).toBe(302);
+      const setCookie = res.headers.get('set-cookie') ?? '';
+      expect(setCookie).toContain(`cavemem_viewer=${TOKEN}`);
+      expect(setCookie).toMatch(/HttpOnly/i);
+      expect(setCookie).toMatch(/SameSite=Strict/i);
+      expect(res.headers.get('location')).toBe('/');
+    });
+
+    it('preserves the path on a deep-linked handshake', async () => {
+      seed();
+      const res = await app.request(`/sessions/s1?token=${TOKEN}`, {
+        headers: { host: HOST },
+      });
+      expect(res.status).toBe(302);
+      expect(res.headers.get('location')).toBe('/sessions/s1');
+    });
+
+    it('rejects a wrong ?token=', async () => {
+      const res = await app.request('/?token=wrong', { headers: { host: HOST } });
+      expect(res.status).toBe(401);
+      expect(res.headers.get('set-cookie')).toBeNull();
+    });
+
+    it('the resulting cookie authenticates a later HTML request', async () => {
+      const res = await req('/', { headers: { cookie: `cavemem_viewer=${TOKEN}` } });
+      expect(res.status).toBe(200);
+    });
+
+    it('the viewer cookie does not authenticate /api/*', async () => {
+      const res = await req('/api/sessions', { headers: { cookie: `cavemem_viewer=${TOKEN}` } });
+      expect(res.status).toBe(401);
+    });
+  });
 });
 
 describe('worker token file', () => {

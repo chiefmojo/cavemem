@@ -42,7 +42,7 @@ SQLite contention does not arise: one process owns the store and is the only wri
 
 Privacy is enforced at the write boundary. Content inside `<private>…</private>` tags is stripped. Paths matching `settings.excludePatterns` are never read. Neither appears in logs. The write boundary is the server's `MemoryStore`: in remote mode, raw hook payloads cross the LAN to the central worker before `excludePatterns` and `<private>` stripping apply (spec decision 4, 2026-09-02).
 
-Remote mode assumes a trusted subnet and uses a static bearer token; it does not add TLS, OAuth, or per-client tokens.
+Remote mode assumes a trusted subnet and uses a static bearer token; it does not add TLS, OAuth, or per-client tokens. The worker requires auth on every route except `/healthz`. `/api/*` and `/mcp` accept only the bearer token (`Authorization: Bearer <token>` or `X-Cavemem-Token`) — a browser navigation can't set either header. The viewer HTML routes (`/`, `/sessions/:id`) instead accept a one-time `?token=` query parameter, which the server trades for an `HttpOnly`, `SameSite=Strict` session cookie and a redirect that strips the token from the URL; `cavemem viewer` performs this handshake automatically. The cookie authenticates HTML routes only — it is never accepted on `/api/*` or `/mcp`, so a viewer tab open in a browser can't be used to drive the write path.
 
 ## Deployment
 

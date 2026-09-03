@@ -19,6 +19,7 @@ import {
   getOrCreateToken,
   hostAllowlist,
   originCheck,
+  viewerAuth,
 } from './security.js';
 import { renderIndex, renderSession } from './viewer.js';
 
@@ -47,8 +48,10 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
   const { port, token, loop } = opts;
 
   // Host/Origin checks apply to every route (kills DNS rebinding + CSRF from
-  // browser pages). Every route except healthz requires the bearer because a
-  // LAN worker's viewer renders plaintext memory.
+  // browser pages). Every route except healthz requires auth because a LAN
+  // worker's viewer renders plaintext memory: HTML routes accept the cookie
+  // handshake (viewerAuth — a browser navigation can't carry a bearer
+  // header), everything else (/api/*, /mcp) stays bearer-only.
   const allowed = allowedHostSet(port, opts.allowedHosts ?? []);
   app.use('*', hostAllowlist(allowed));
   app.use('*', originCheck(allowed));
@@ -56,8 +59,11 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
     loop?.touch();
     await next();
   });
+  const isViewerPath = (path: string) => path === '/' || path.startsWith('/sessions/');
   app.use('*', async (c, next) => {
-    if (c.req.path === '/healthz') return next();
+    const path = c.req.path;
+    if (path === '/healthz') return next();
+    if (isViewerPath(path)) return viewerAuth(token)(c, next);
     return bearerAuth(token)(c, next);
   });
 

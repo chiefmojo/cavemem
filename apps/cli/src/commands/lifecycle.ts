@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadSettings, resolveDataDir } from '@cavemem/config';
+import { loadSettings, resolveDataDir, workerTokenPath } from '@cavemem/config';
 import type { Command } from 'commander';
 import kleur from 'kleur';
 import { requireLocal } from '../util/mode.js';
@@ -148,8 +148,25 @@ export function registerLifecycleCommands(program: Command): void {
       if (!requireLocal(settings, 'viewer')) return;
       startWorker(true);
       await waitForPidOrPort();
-      const port = loadSettings().workerPort;
-      const url = `http://127.0.0.1:${port}`;
+      const current = loadSettings();
+      const port = current.workerPort;
+      // The worker requires bearer auth on every route now (server.ts);
+      // browser navigation can't send an Authorization header, so the HTML
+      // routes trade this one-time query token for a cookie (viewerAuth) —
+      // read after waitForPidOrPort so the worker has had a chance to write
+      // worker-token on a cold start.
+      let url = `http://127.0.0.1:${port}`;
+      try {
+        const token = readFileSync(workerTokenPath(current.dataDir), 'utf8').trim();
+        if (!token) throw new Error('worker-token file is empty');
+        url += `/?token=${encodeURIComponent(token)}`;
+      } catch (err) {
+        process.stdout.write(
+          `${kleur.red('could not read worker token')} — ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
       const cmd =
         process.platform === 'darwin'
           ? ['open', url]
