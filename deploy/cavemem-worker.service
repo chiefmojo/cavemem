@@ -1,0 +1,22 @@
+[Unit]
+Description=cavemem shared memory worker (HTTP + MCP + embedding backfill)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agentops
+Group=agentops
+WorkingDirectory=/home/agentops
+Environment=NODE_ENV=production
+Environment=CAVEMEM_NO_AUTOSTART=1
+ExecStart=/home/agentops/.local/bin/cavemem worker run
+Restart=on-failure
+RestartSec=3
+# The worker writes worker.pid / worker.state.json / worker-token here.
+ReadWritePaths=/home/agentops/.cavemem
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
