@@ -10,6 +10,8 @@ The signature property is that **memory is stored compressed**. Every write path
 
 Runtime state (`settings.json`, `data.db`, models, logs) lives in the resolved cavemem home — `~/.cavemem` by default, `CAVEMEM_HOME` or the XDG path when set. Never in this repo.
 
+Commands, merge gates, coding style, and PR conventions live in `AGENTS.md` — this file covers architecture, invariants, and rationale.
+
 ## Fork status
 
 Upstream `JuliusBrussee/cavemem` is frozen (Aug 2026); its compressed-memory core was slated to continue inside `caveman`. `chiefmojo/cavemem` (this checkout, `origin`) is now the active home — develop here directly. There is **no upstream contribution flow**: no PRs back to `JuliusBrussee`, so no PR-content scrub hooks, no contribution rubric, no "what would upstream want" lens. That makes this different from `hermes-agent-contrib` / `MemOS-contrib`, which do track upstream.
@@ -78,14 +80,9 @@ A full codemap is at `codemap.md` in the project root. Before working on a task,
 
 ## Development workflow
 
-- `pnpm install` once. Node ≥ 20, pnpm ≥ 9.
-- `pnpm dev` runs the CLI and worker in watch mode against a repo-local scratch data dir (`CAVEMEM_HOME=$PWD/.cavemem-dev`) so dev runs never touch `~/.cavemem`.
-- The four required gates before merging:
-  - `pnpm typecheck`
-  - `pnpm lint` (Biome)
-  - `pnpm test`
-  - `pnpm build`
-- New features require unit tests. Any change that affects MCP contracts requires an integration test: use the MCP inspector for stdio/local contracts, and the SDK's `StreamableHTTPClientTransport` for the worker's `/mcp` route because browser Origin/CORS policy intentionally rejects the inspector.
+Commands and the four merge gates are in `AGENTS.md`. Two rules that shape design:
+
+- New features require unit tests. Any change that affects MCP contracts requires an integration test: the MCP inspector for stdio/local contracts, and the SDK's `StreamableHTTPClientTransport` for the worker's `/mcp` route because browser Origin/CORS policy intentionally rejects the inspector.
 - Every PR touching a package under `packages/*` or `apps/*` needs a changeset entry (`pnpm changeset`).
 
 ## End-to-end publish test
