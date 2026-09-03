@@ -154,3 +154,27 @@ SQLite contention does not arise: one process, one writer.
 - Ordering of replayed spool entries relative to live writes. Accepted per the requirements.
 - oh-my-pi hooks and MCP entry.
 - TLS or per-client tokens. Single subnet, single token, by decision.
+
+## Faye review addendum (2026-09-02)
+
+Verified against live source in `chiefmojo/cavemem` (`apps/{cli,worker,mcp-server}`, `packages/{config,core,hooks,storage,installers}`). The five findings and the injected-store claim all hold; three seam gaps below.
+
+### Must fix
+
+1. **Bind-address wiring is missing from the change list.** `apps/worker/src/server.ts:169` hardcodes `hostname: '127.0.0.1'` in the `serve()` call. The spec adds `workerHost` and Finding #1 fixes the allowlist, but the "Server (apps/worker)" change list never says to bind `serve()` to `settings.workerHost`. As written, a faithful implementer lands the allowlist + `workerHost` setting while the worker still binds loopback — LAN clients get connection-refused before ever reaching the allowlist. Add one explicit item: `serve()` binds `settings.workerHost` (default `127.0.0.1`, per the settings block).
+
+### Should fix
+
+2. **`MemoryStore.startSession` core change omitted.** The spec says `session-start.ts` "persists `metadata.host` on the session row," but `packages/core/src/memory-store.ts:31` takes `{ id, ide, cwd }` and hardcodes `metadata: null`. The storage layer already supports it (`packages/storage/src/schema.ts:14` has the column; `storage.ts:149-151` binds `s.metadata`), so only the core signature needs a `metadata` param — but the change list names only `session-start.ts`. List the `packages/core` change explicitly or the host column never fills.
+
+3. **Origin check vs the browser-based MCP inspector.** `originCheck` (`security.ts:54-62`) 403s any Origin other than `http://<entry>`, and the worker adds no CORS headers (deliberate — `security.ts:12-14`). The integration test ("MCP inspector against `/mcp`") runs in a browser whose Origin is neither `http://neuromancer:37777` nor `http://<lan-ip>:37777`, so it will 403, and CORS preflight will reject it before that. Either exempt `/mcp` from the Origin check, drive the integration test with a non-browser streamable-HTTP client (curl), or add inspector-specific CORS. Settle before the plan, or the test fails for reasons unrelated to the MCP contract it's meant to cover.
+
+### Minor
+
+4. **`WebStandardStreamableHTTPServerTransport` name + stateless contract unverified here.** `pnpm-lock.yaml` resolves `@modelcontextprotocol/sdk@1.29.0` (consistent with Finding #2), but `node_modules` isn't installed in this checkout, so the class name and the `sessionIdGenerator: undefined` stateless behavior couldn't be confirmed against the actual SDK. Confirm at build time — it's load-bearing for the `/mcp` transport.
+
+5. **Graceful-degradation note (not a bug):** in remote mode, `session-start` returns empty context when the server is unreachable (error table: spool, exit 0, empty context). A remote session during an outage therefore starts with no prior-session injection at all. Acceptable per the non-goals, but worth stating so it isn't read as a regression during live testing.
+
+### Verdict
+
+Direction is right and the load-bearing claims hold against source. The only real risk is the unlisted `serve()` bind wiring (#1); the rest is scope-completeness. Fix #1, settle #2/#3, and this is ready to plan.
