@@ -36,11 +36,21 @@ export function registerInstallCommand(program: Command): void {
         process.stdout.write(`${kleur.dim('wrote')} ${path}\n`);
       }
       const settings = loadSettings();
+      if (settings.remote.url && !settings.remote.token) {
+        process.stderr.write(
+          `${kleur.red('remote.url is set but remote.token is empty')} — copy the server's worker-token into settings first\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
       const ctx = {
         ideConfigDir: homedir(),
         cliPath: resolveCliPath(),
         nodeBin: process.execPath,
         dataDir: resolveDataDir(settings.dataDir),
+        ...(settings.remote.url && settings.remote.token
+          ? { remote: { url: settings.remote.url, token: settings.remote.token } }
+          : {}),
       };
       const installer = getInstaller(name);
       const msgs = await installer.install(ctx);
@@ -63,7 +73,11 @@ export function registerInstallCommand(program: Command): void {
 
       process.stdout.write(`\n${kleur.bold('cavemem is wired into')} ${kleur.cyan(name)}\n`);
       process.stdout.write(
-        `${kleur.dim('memory writes happen in hooks — no daemon required on the hot path.')}\n\n`,
+        `${kleur.dim(
+          ctx.remote
+            ? `remote mode — hooks and MCP talk to ${ctx.remote.url}`
+            : 'memory writes happen in hooks — no daemon required on the hot path.',
+        )}\n\n`,
       );
       process.stdout.write(`${kleur.bold('what to try next:')}\n`);
       process.stdout.write(

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { loadSettings, resolveDataDir } from '@cavemem/config';
 import type { Command } from 'commander';
 import kleur from 'kleur';
+import { requireLocal } from '../util/mode.js';
 import { resolveCliPath } from '../util/resolve.js';
 
 /**
@@ -89,6 +90,8 @@ export function registerLifecycleCommands(program: Command): void {
     .command('start')
     .description('Start the worker daemon (embeddings + viewer)')
     .action(async () => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'start')) return;
       const pid = startWorker();
       if (pid) {
         const ready = await waitForPidOrPort();
@@ -107,6 +110,8 @@ export function registerLifecycleCommands(program: Command): void {
     .command('stop')
     .description('Stop the worker daemon')
     .action(() => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'stop')) return;
       if (stopWorker()) {
         process.stdout.write(`${kleur.green('stopped')}\n`);
       } else {
@@ -118,6 +123,8 @@ export function registerLifecycleCommands(program: Command): void {
     .command('restart')
     .description('Restart the worker daemon')
     .action(async () => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'restart')) return;
       stopWorker();
       // Give the old process a moment to release the port.
       await new Promise((r) => setTimeout(r, 300));
@@ -137,6 +144,8 @@ export function registerLifecycleCommands(program: Command): void {
     .command('viewer')
     .description('Open the memory viewer in your browser (auto-starts worker)')
     .action(async () => {
+      const settings = loadSettings();
+      if (!requireLocal(settings, 'viewer')) return;
       startWorker(true);
       await waitForPidOrPort();
       const port = loadSettings().workerPort;

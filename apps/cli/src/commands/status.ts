@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadSettings, resolveDataDir, settingsPath } from '@cavemem/config';
+import { remoteTarget, spoolDepth, spoolPath } from '@cavemem/hooks';
 import { type IdeName, installers } from '@cavemem/installers';
 import { Storage } from '@cavemem/storage';
 import type { Command } from 'commander';
 import kleur from 'kleur';
+import { probeRemote } from '../util/remote.js';
 
 interface WorkerState {
   provider?: string;
@@ -66,7 +68,7 @@ export function registerStatusCommand(program: Command): void {
   program
     .command('status')
     .description('Show cavemem wiring, data, and worker state')
-    .action(() => {
+    .action(async () => {
       const sp = settingsPath();
       const settings = loadSettings();
       const dir = resolveDataDir(settings.dataDir);
@@ -77,6 +79,26 @@ export function registerStatusCommand(program: Command): void {
         `settings:   ${sp} ${existsSync(sp) ? kleur.green('✓') : kleur.yellow('default')}\n`,
       );
       process.stdout.write(`data dir:   ${dir}\n`);
+
+      const target = remoteTarget(settings);
+      if (target) {
+        const probe = await probeRemote(target);
+        process.stdout.write(`mode:       ${kleur.cyan('remote')} ${target.url}\n`);
+        process.stdout.write(
+          `server:     ${probe.healthz ? kleur.green('reachable') : kleur.red('unreachable')}` +
+            `${probe.healthz ? (probe.auth ? kleur.green(' auth ok') : kleur.red(' auth failed')) : ''}` +
+            `${probe.error ? kleur.dim(` (${probe.error})`) : ''}\n`,
+        );
+        process.stdout.write(`spool:      ${spoolDepth(spoolPath(settings))} queued\n`);
+        const enabled = Object.entries(settings.ides)
+          .filter(([, v]) => v)
+          .map(([k]) => k);
+        process.stdout.write(
+          `ides:       ${enabled.length ? enabled.map(annotateIde).join(', ') : kleur.dim('none installed — try `cavemem install`')}\n`,
+        );
+        if (!probe.healthz || !probe.auth) process.exitCode = 1;
+        return;
+      }
 
       // DB
       let obsCount = 0;

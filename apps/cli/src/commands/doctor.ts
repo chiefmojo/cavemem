@@ -1,10 +1,12 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadSettings, resolveDataDir, settingsPath } from '@cavemem/config';
-import { checkWindowsSh } from '@cavemem/installers';
+import { remoteTarget, spoolDepth, spoolPath } from '@cavemem/hooks';
+import { CODEX_TOKEN_ENV, checkWindowsSh } from '@cavemem/installers';
 import { Storage } from '@cavemem/storage';
 import type { Command } from 'commander';
 import kleur from 'kleur';
+import { probeRemote } from '../util/remote.js';
 
 export function registerDoctorCommand(program: Command): void {
   program
@@ -18,6 +20,33 @@ export function registerDoctorCommand(program: Command): void {
       const settings = loadSettings();
       const dir = resolveDataDir(settings.dataDir);
       process.stdout.write(`dataDir:  ${dir}\n`);
+      const target = remoteTarget(settings);
+      if (target) {
+        process.stdout.write(`mode:     remote ${target.url}\n`);
+        process.stdout.write(
+          `token:    ${target.token ? kleur.green('present') : kleur.red('missing')}\n`,
+        );
+        if (!target.token) process.exitCode = 1;
+        const probe = await probeRemote(target);
+        process.stdout.write(
+          `server:   ${probe.healthz ? kleur.green('ok') : kleur.red('fail')} ${probe.error ?? ''}\n`,
+        );
+        process.stdout.write(`auth:     ${probe.auth ? kleur.green('ok') : kleur.red('fail')}\n`);
+        if (!probe.healthz || !probe.auth) process.exitCode = 1;
+        if (settings.ides.codex && !process.env[CODEX_TOKEN_ENV]) {
+          process.stdout.write(
+            `codex:    ${kleur.yellow(`${CODEX_TOKEN_ENV} not set in this shell — codex MCP auth will fail`)}\n`,
+          );
+        }
+        const pid = join(dir, 'worker.pid');
+        if (existsSync(pid)) {
+          process.stdout.write(
+            `worker:   ${kleur.yellow('local pidfile present — run `cavemem stop` before relying on remote mode')}\n`,
+          );
+        }
+        process.stdout.write(`spool:    ${spoolDepth(spoolPath(settings))} queued\n`);
+        return;
+      }
       const dbPath = join(dir, 'data.db');
       try {
         const s = new Storage(dbPath);

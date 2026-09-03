@@ -4,6 +4,7 @@ import { loadSettings, resolveDataDir } from '@cavemem/config';
 import { Storage } from '@cavemem/storage';
 import type { Command } from 'commander';
 import kleur from 'kleur';
+import { requireLocal } from '../util/mode.js';
 
 export function registerExportCommand(program: Command): void {
   program
@@ -11,6 +12,7 @@ export function registerExportCommand(program: Command): void {
     .description('Export memory to JSONL')
     .action(async (out: string) => {
       const settings = loadSettings();
+      if (!requireLocal(settings, 'export')) return;
       const dbPath = join(resolveDataDir(settings.dataDir), 'data.db');
       try {
         const { records } = exportJsonl(dbPath, out);
@@ -29,6 +31,7 @@ export function registerExportCommand(program: Command): void {
     .option('--dry-run', 'validate and report counts without writing')
     .action(async (file: string, opts: { dryRun?: boolean }) => {
       const settings = loadSettings();
+      if (!requireLocal(settings, 'import')) return;
       const dbPath = join(resolveDataDir(settings.dataDir), 'data.db');
       let counts: ImportCounts;
       try {
