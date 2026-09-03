@@ -1,11 +1,12 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import * as embedding from '@cavemem/embedding';
 import { defaultSettings } from '@cavemem/config';
 import { MemoryStore } from '@cavemem/core';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildServer } from '../src/server.js';
 
 let dir: string;
@@ -126,10 +127,36 @@ describe('buildServer embedder injection', () => {
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const c = new Client({ name: 't', version: '0' });
     await Promise.all([server.connect(st), c.connect(ct)]);
-    const { a } = await seed();
-    store.storage.putEmbedding(a, fake.model, new Float32Array([1, 0, 0]));
-    await c.callTool({ name: 'search', arguments: { query: 'cargo' } });
-    expect(calls.length).toBeGreaterThan(0);
+    await seed();
+    const semanticOnly = store.addObservation({
+      session_id: 's1',
+      kind: 'note',
+      content: 'A quiet note about weather patterns.',
+    });
+    store.storage.putEmbedding(semanticOnly, fake.model, new Float32Array([1, 0, 0]));
+    const res = await c.callTool({ name: 'search', arguments: { query: 'cargo' } });
+    const text = (res.content as Array<{ type: string; text: string }>)[0]?.text ?? '[]';
+    const hits = JSON.parse(text) as Array<{ id: number }>;
+    expect(hits.some((hit) => hit.id === semanticOnly)).toBe(true);
+    expect(calls).toEqual(['cargo']);
     await c.close();
+  });
+
+  it('uses BM25 only when null is injected without lazy-loading an embedder', async () => {
+    const createEmbedder = vi
+      .spyOn(embedding, 'createEmbedder')
+      .mockRejectedValue(new Error('must not load'));
+    const server = buildServer(store, defaultSettings, { embedder: null });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const c = new Client({ name: 't', version: '0' });
+    await Promise.all([server.connect(st), c.connect(ct)]);
+    await seed();
+    const res = await c.callTool({ name: 'search', arguments: { query: 'cargo' } });
+    const text = (res.content as Array<{ type: string; text: string }>)[0]?.text ?? '[]';
+    const hits = JSON.parse(text) as Array<{ snippet: string }>;
+    expect(hits.some((hit) => hit.snippet.includes('cargo'))).toBe(true);
+    expect(createEmbedder).not.toHaveBeenCalled();
+    await c.close();
+    createEmbedder.mockRestore();
   });
 });
