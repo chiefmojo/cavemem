@@ -114,14 +114,16 @@ function tryAcquireLock(spool: string): SpoolLock | null {
     const fd = openSync(path, 'wx', 0o600);
     try {
       writeFileSync(fd, `${process.pid}\n`, 'utf8');
-    } catch (err) {
-      closeSync(fd);
+    } catch {
       try {
-        unlinkSync(path);
+        closeSync(fd);
       } catch {
-        // Best-effort cleanup; the original lock-write error is authoritative.
+        // The short-lived CLI process will close the descriptor on exit.
       }
-      throw err;
+      // Do not unlink after binding becomes uncertain: another actor could
+      // replace the path before cleanup and we would delete its live lock.
+      logLockBindingFailure();
+      return null;
     }
     return { fd, path };
   } catch (err) {
@@ -177,5 +179,21 @@ function logLockedSpool(): void {
     );
   } catch {
     // Logging must not make lock contention block a hook.
+  }
+}
+
+function logLockBindingFailure(): void {
+  try {
+    process.stderr.write(
+      `${JSON.stringify({
+        remote: true,
+        spool: true,
+        ok: false,
+        reason: 'lock-binding',
+        error: 'spool lock metadata write failed; operation deferred',
+      })}\n`,
+    );
+  } catch {
+    // Logging must not make an ownership-uncertain failure block a hook.
   }
 }

@@ -141,6 +141,35 @@ describe('spool', () => {
     );
   });
 
+  it('leaves the lock path when binding metadata cannot be written', async () => {
+    const actualFs = await import('node:fs');
+    const failMetadataWrite = ((file: unknown, ...args: unknown[]) => {
+      if (typeof file === 'number') throw new Error('injected lock metadata failure');
+      return Reflect.apply(actualFs.writeFileSync, actualFs, [file, ...args]);
+    }) as typeof actualFs.writeFileSync;
+    vi.resetModules();
+    vi.doMock('node:fs', () => ({ ...actualFs, writeFileSync: failMetadataWrite }));
+
+    try {
+      const { appendSpool: appendWithFailedBinding } = await import('../src/spool.js');
+      const logs: string[] = [];
+      vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+        logs.push(String(chunk));
+        return true;
+      });
+
+      expect(() => appendWithFailedBinding(path, entry(0))).toThrow(/spool is busy/);
+      expect(existsSync(`${path}.lock`)).toBe(true);
+      expect(existsSync(path)).toBe(false);
+      expect(logs.map((line) => JSON.parse(line) as Record<string, unknown>)).toContainEqual(
+        expect.objectContaining({ spool: true, ok: false, reason: 'lock-binding' }),
+      );
+    } finally {
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+    }
+  });
+
   it('logs and discards malformed JSON without counting it as sent', async () => {
     writeFileSync(path, `{not-json}\n${JSON.stringify(entry(1))}\n`, 'utf8');
     const logs: string[] = [];
