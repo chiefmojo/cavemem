@@ -15,12 +15,12 @@ Remote mode lets one central cavemem worker on a trusted LAN own the SQLite stor
 | `workerAllowedHosts` | `[]` | Additional accepted `host:port` Host headers and matching `http://<host:port>` Origins. Empty keeps the loopback-only fallback even if `workerHost` is `"0.0.0.0"`. |
 | `embedding.idleShutdownMs` | `600000` | Idle lifetime in milliseconds; `0` disables shutdown and is required for the central server. |
 
-The central server should set `workerHost` to `"0.0.0.0"`, provide a non-empty `workerAllowedHosts`, and set `embedding.idleShutdownMs` to `0`. Clients set only the `remote` block and retain their local database as a fallback until the server has been validated.
+The central server should set `workerHost` to `"0.0.0.0"`, provide a non-empty `workerAllowedHosts`, and set `embedding.idleShutdownMs` to `0`. Client settings need only the `remote` block; retain the local database as a fallback until the server has been validated.
 
 ## What changes on a client
 
 - Hooks still invoke `cavemem hook run <event>` locally, but the runner adds `metadata.host` and synchronously POSTs the raw hook input to `<remote.url>/api/hooks/:event`. Non-auth delivery failures are spooled locally for best-effort replay.
-- `cavemem install` writes remote MCP entries for Claude Code (`type: "http"`), Codex (`url` plus `bearer_token_env_var: "CAVEMEM_REMOTE_TOKEN"`), and OpenCode (`type: "remote"`) instead of stdio commands.
+- After setting `remote.url`, run or rerun `cavemem install` for each client IDE. It writes remote MCP entries for Claude Code (`type: "http"`), Codex (`url` plus `bearer_token_env_var: "CAVEMEM_REMOTE_TOKEN"`), and OpenCode (`type: "remote"`) instead of stdio commands.
 - `cavemem search` calls `GET <remote.url>/api/search` with the bearer token instead of querying a local store.
 - Local-only commands refuse with `remote mode: run this on the server`: `worker *`, `start`, `stop`, `restart`, `viewer`, `reindex`, `export`, `import`, and `mcp`.
 
@@ -28,9 +28,9 @@ The central server should set `workerHost` to `"0.0.0.0"`, provide a non-empty `
 
 | Condition | Outcome |
 |-----------|---------|
-| Server unreachable or timeout | Spool, one structured JSON log line to stderr, exit 0, empty context. A session started during an outage gets no prior-session injection at all; that is accepted degradation, not a regression. |
-| 401 | Log line with `reason: "auth"`, no spool (replay would fail identically), exit 0. |
-| `remote.url` set, token missing | No POST. Log line, exit 0. `doctor` reports it. |
+| Server unreachable or timeout | Spool when possible; emit a structured remote-failure JSON line plus the CLI's normal hook telemetry line to stderr (a spool error may add its own structured line); exit 0 with empty context. A session started during an outage gets no prior-session injection at all; that is accepted degradation, not a regression. |
+| 401 | Emit a remote failure line with `reason: "auth"` plus normal hook telemetry, no spool (replay would fail identically), exit 0. |
+| `remote.url` set, token missing | No POST. Emit a remote failure line with `reason: "no-token"` plus normal hook telemetry, exit 0. `doctor` reports it. |
 | Spool replay fails mid-drain | Stop, keep remainder, retry on next successful hook. |
 | Worker restart | systemd `Restart=on-failure`. Clients spool during the gap and drain after. |
 | Unknown `:event` on `/api/hooks` | 400 with a JSON error body. |

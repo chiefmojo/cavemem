@@ -50,7 +50,7 @@ No daemon to start. Hooks write synchronously. A local worker auto-spawns in the
 
 ### Remote mode
 
-Remote mode lets one central worker own the memory store for agents on multiple machines. Setting `remote.url` makes client hooks POST to that worker and configures supported IDEs to use MCP over streamable HTTP; see [Remote mode](docs/remote.md) for settings, client behavior, and failure handling. See the [deployment runbook](deploy/README.md) to install and operate the shared server.
+Remote mode lets one central worker own the memory store for agents on multiple machines. After setting `remote.url`, rerun `cavemem install --ide claude-code`, `cavemem install --ide codex`, and `cavemem install --ide opencode` so each IDE's existing MCP entry is rewritten for streamable HTTP; see [Remote mode](docs/remote.md) for settings, client behavior, and failure handling. See the [deployment runbook](deploy/README.md) to install and operate the shared server.
 
 ### IDE capability matrix
 

@@ -1,12 +1,13 @@
 # Repository Atlas: cavemem
 
 ## Project Responsibility
-A cross-agent persistent memory system for coding assistants. It captures observations from editor sessions, compresses prose using the project's deterministic caveman grammar (`@cavemem/compress`), stores entries in a local SQLite + vector index (`@cavemem/storage`), and exposes them to agents through an MCP server (`apps/mcp-server`) and a local web viewer (served by `apps/worker`). The signature property is that **memory is stored compressed** — every write runs through `compress`, every human-facing read runs back through `expand`.
+A cross-agent persistent memory system for coding assistants. It captures observations from editor sessions, compresses prose using the project's deterministic caveman grammar (`@cavemem/compress`), and stores entries in a SQLite + vector index (`@cavemem/storage`) owned either by the local process or one central LAN worker. Agents read through MCP over local stdio or the worker's stateless streamable HTTP route, while the worker also serves the human-facing viewer. The signature property is that **memory is stored compressed** — every write runs through `compress`, every human-facing read runs back through `expand`.
 
 ## System Entry Points
 - `apps/cli/src/index.ts` — the published `cavemem` binary: commander CLI + OpenCode plugin bridge (`opencode-bridge.ts`).
-- `apps/mcp-server/src/server.ts` — stdio MCP server (tool registration, progressive disclosure).
-- `apps/worker/src/server.ts` — local HTTP daemon (read-only viewer + embedding backfill).
+- `apps/mcp-server/src/server.ts` — shared MCP tool registration plus the local stdio entrypoint.
+- `apps/worker/src/server.ts` — configurable HTTP daemon: viewer, embedding backfill, remote hook execution, and stateless streamable HTTP MCP at `/mcp`.
+- `packages/hooks/src/runner.ts` — local/injected handler dispatch or remote hook delivery with bounded spool replay.
 - `packages/core/src/memory-store.ts` — `MemoryStore`, the single enforced write path.
 - `packages/compress/src/tokenize.ts` — the single authority for technical-token preservation.
 - `package.json` / `pnpm-workspace.yaml` — workspace + build orchestration.
@@ -20,14 +21,14 @@ A cross-agent persistent memory system for coding assistants. It captures observ
 | `packages/storage/` | Sole SQLite owner — idempotent schema (WAL + FTS5 + sync triggers), dual backend, BM25 `searchFts`, embedding persistence. | [View Map](packages/storage/codemap.md) |
 | `packages/core/` | Domain layer — models, hybrid ranker, session IDs, and `MemoryStore`, the single enforced write path (redact → compress → persist). | [View Map](packages/core/codemap.md) |
 | `packages/embedding/` | Provider factory — `Embedder { model, dim, embed }` (local/Ollama/OpenAI/`none`), dim correctness before first use, musl-libc guard. | [View Map](packages/embedding/codemap.md) |
-| `packages/hooks/` | IDE lifecycle hook handlers + dispatcher + worker auto-spawn (150 ms p95 hot path, no network calls). | [View Map](packages/hooks/codemap.md) |
+| `packages/hooks/` | IDE lifecycle handlers plus a mode-aware dispatcher: local/injected `MemoryStore`, remote HTTP delivery, bounded spool replay, and local-only worker auto-spawn. | [View Map](packages/hooks/codemap.md) |
 | `packages/installers/` | Per-IDE detect/install/uninstall modules registering hooks + MCP entries across nine IDEs behind a uniform `Installer` contract. | [View Map](packages/installers/codemap.md) |
 | `apps/cli/` | The published `cavemem` npm binary — commander CLI + OpenCode plugin bridge + prepack/pack-release publish tooling. | [View Map](apps/cli/codemap.md) |
-| `apps/mcp-server/` | stdio MCP server — progressive disclosure + opt-in SSRF-hardened web enrichment. | [View Map](apps/mcp-server/codemap.md) |
-| `apps/worker/` | 127.0.0.1-only HTTP daemon — read-only viewer + embedding backfill loop. | [View Map](apps/worker/codemap.md) |
+| `apps/mcp-server/` | Shared progressive-disclosure MCP server builder plus local stdio transport and opt-in SSRF-hardened web enrichment. | [View Map](apps/mcp-server/codemap.md) |
+| `apps/worker/` | HTTP daemon bound to `workerHost` (loopback by default): viewer, embedding backfill, bearer-protected remote hooks, and streamable HTTP MCP. | [View Map](apps/worker/codemap.md) |
 | `evals/` | Token-savings benchmark harness running `@cavemem/compress` over a fixed corpus. | [View Map](evals/codemap.md) |
 | `hooks-scripts/` | Portable shell stubs that invoke `cavemem hook run <event>`. | [View Map](hooks-scripts/codemap.md) |
-| `scripts/` | End-to-end publish test harness (changeset + legacy `publish:release` paths). | [View Map](scripts/codemap.md) |
+| `scripts/` | End-to-end publish harnesses for changesets, legacy `publish:release`, and isolated remote server/client mode. | [View Map](scripts/codemap.md) |
 | `examples/` | Reference `settings.example.json` sample. | [View Map](examples/codemap.md) |
 
 ## Dependency Direction
@@ -35,4 +36,4 @@ Strictly downward: `apps/*` may depend on `packages/*`; `packages/*` may depend 
 
 ## Notes
 - The `viewer` listed in `CLAUDE.md`'s Layout does not exist as a standalone directory — the read-only UI is served by `apps/worker` (`viewer.ts`). The worker's codemap is the authority for viewer behavior.
-- `.github/workflows/`, `.changeset/`, and `docs/` are not mapped (not source/config-tracked); `docs/mcp.md` documents the MCP contract, `docs/architecture.md` the high-level design.
+- `.github/workflows/`, `.changeset/`, and `docs/` are not mapped (not source/config-tracked); `docs/mcp.md` documents the MCP contract, `docs/remote.md` remote mode, `deploy/README.md` the shared-server runbook, and `docs/architecture.md` the high-level design.

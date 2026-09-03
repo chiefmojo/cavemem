@@ -7,7 +7,8 @@ Implemented Task 13 from `docs/superpowers/plans/2026-09-02-shared-memory-server
 - Baseline: `2ae3c33372ed5ece8acf615e48c8ca495771d6aa`
 - Task brief: `.superpowers/sdd/2026-09-02-shared-memory-server/task-13-brief.md`
 - Design: `docs/superpowers/specs/2026-09-02-shared-memory-server-design.md`
-- Commit subject: `docs: remote mode, MCP transport, rules 6 and 9, changeset`
+- Initial commit subject: `docs: remote mode, MCP transport, rules 6 and 9, changeset`
+- Round-one correction subject: `docs: reconcile remote mode guidance`
 - Required author: `Erick <chiefmojo@chiefmojo.com>`
 
 The worktree did not contain an `AGENTS.md`; the supplied cavemem Agent Playbook and the repository's identical `CLAUDE.md` rules were treated as authoritative. No implementation behavior, deployment, live service, remote data, push, or PR operation was in scope.
@@ -31,9 +32,9 @@ The worktree did not contain an `AGENTS.md`; the supplied cavemem Agent Playbook
 - `README.md`
   - Added a three-sentence Remote mode section immediately after installation guidance, linking `docs/remote.md` and `deploy/README.md`.
 - `apps/worker/codemap.md`
-  - Added the remote hook endpoint, HTTP MCP route, `allowedHostSet`, and `workerHost` bind responsibilities.
+  - Documented the remote hook endpoint, HTTP MCP route, `allowedHostSet`, and `workerHost` bind responsibilities.
 - `packages/hooks/codemap.md`
-  - Added `remote.ts`, `spool.ts`, and the runner's remote branch.
+  - Documented `remote.ts`, `spool.ts`, and the runner's remote branch.
 - `.changeset/shared-memory-server.md`
   - Added the exact requested minor changeset for `cavemem`, config, core, hooks, installers, worker, and MCP server.
 
@@ -48,9 +49,19 @@ The baseline `pnpm lint` failed with exactly four existing Biome findings. Biome
 
 These changes are whitespace/import-order only and do not alter runtime or test behavior. No other source or test file was formatted.
 
+## Round-one review corrections
+
+Addressed every P2/P3 finding in `.superpowers/sdd/2026-09-02-shared-memory-server/task-13-review-report.md`:
+
+- Reconciled `CLAUDE.md` with the implemented mode split: individual/injected handlers remain network-free, while only the remote runner performs bounded HTTP and replay work; remote delivery fails open; missing-token and HTTP 401 paths do not spool.
+- Replaced both MCP inspector-only directives with transport-specific rules: inspector for stdio/local contracts and the SDK's `StreamableHTTPClientTransport` for `/mcp`, which intentionally remains unavailable to browser Origins.
+- Reworked `codemap.md`, `apps/worker/codemap.md`, and `packages/hooks/codemap.md` throughout their responsibility, design, flow, integration, route, dependency, public-surface, and test sections. The earlier local-only descriptions were replaced rather than left beside remote-mode override paragraphs.
+- Corrected the README to require rerunning the explicit Claude Code, Codex, and OpenCode installer commands after setting `remote.url`; changing settings alone does not rewrite existing IDE MCP configuration.
+- Corrected remote failure telemetry: runner diagnostics are followed by the CLI's normal structured hook telemetry, and a spool-layer error may add another structured diagnostic.
+
 ## Verification
 
-All required gates were run from `/tmp/cavemem-shared-memory-server` after the final edits:
+All initial Task 13 gates were run from `/tmp/cavemem-shared-memory-server` after the original implementation edits:
 
 | Gate | Result |
 |------|--------|
@@ -63,3 +74,5 @@ All required gates were run from `/tmp/cavemem-shared-memory-server` after the f
 | `git diff --check` | Passed with no whitespace errors. |
 
 The two e2e scripts used their own isolated homes/prefixes and packed artifact. No SSH, deployment, live service, live data, push, PR, or tracker operation was performed.
+
+After the round-one documentation corrections, documentation consistency checks and `git diff --check` passed; `pnpm lint` checked 149 files cleanly; all 11 participating `pnpm typecheck` projects passed; and all 349 tests in 32 files passed under `pnpm test`. The build and packed-artifact e2e scripts were not rerun because this correction changes documentation only: no executable source, build configuration, package dependency, installer implementation, or publish script changed.
