@@ -194,12 +194,36 @@ describe('worker HTTP', () => {
     });
   });
 
+  describe('POST /api/viewer-session', () => {
+    it('requires the bearer token like the rest of /api/*', async () => {
+      const res = await req('/api/viewer-session', { method: 'POST' });
+      expect(res.status).toBe(401);
+    });
+
+    it('mints a nonce distinct from the real token', async () => {
+      const res = await apiReq('/api/viewer-session', { method: 'POST' });
+      expect(res.status).toBe(200);
+      const { token: nonce } = (await res.json()) as { token: string };
+      expect(nonce).not.toBe(TOKEN);
+      expect(nonce.length).toBeGreaterThan(0);
+    });
+  });
+
   // A browser top-level navigation can only send cookies, not an
   // Authorization header — `cavemem viewer` bootstraps the session with a
-  // one-time `?token=` query param that trades for a cookie (viewerAuth).
+  // one-time nonce (minted via POST /api/viewer-session) that trades for a
+  // cookie (viewerAuth). The nonce, not the real token, is what a spawned
+  // browser opener receives as an argv — that's the whole point of it.
   describe('viewer cookie handshake', () => {
-    it('a valid ?token= sets a cookie and redirects with the token stripped', async () => {
-      const res = await app.request(`/?token=${TOKEN}`, { headers: { host: HOST } });
+    async function mintNonce(): Promise<string> {
+      const res = await apiReq('/api/viewer-session', { method: 'POST' });
+      const { token } = (await res.json()) as { token: string };
+      return token;
+    }
+
+    it('a valid nonce sets a cookie carrying the real token and redirects with the nonce stripped', async () => {
+      const nonce = await mintNonce();
+      const res = await app.request(`/?token=${nonce}`, { headers: { host: HOST } });
       expect(res.status).toBe(302);
       const setCookie = res.headers.get('set-cookie') ?? '';
       expect(setCookie).toContain(`cavemem_viewer=${TOKEN}`);
@@ -210,17 +234,33 @@ describe('worker HTTP', () => {
 
     it('preserves the path on a deep-linked handshake', async () => {
       seed();
-      const res = await app.request(`/sessions/s1?token=${TOKEN}`, {
+      const nonce = await mintNonce();
+      const res = await app.request(`/sessions/s1?token=${nonce}`, {
         headers: { host: HOST },
       });
       expect(res.status).toBe(302);
       expect(res.headers.get('location')).toBe('/sessions/s1');
     });
 
-    it('rejects a wrong ?token=', async () => {
+    it('rejects a wrong nonce', async () => {
       const res = await app.request('/?token=wrong', { headers: { host: HOST } });
       expect(res.status).toBe(401);
       expect(res.headers.get('set-cookie')).toBeNull();
+    });
+
+    it('rejects the real bearer token used directly as the handshake nonce', async () => {
+      // The whole point of the nonce indirection: even the real credential
+      // isn't a valid handshake value on its own.
+      const res = await app.request(`/?token=${TOKEN}`, { headers: { host: HOST } });
+      expect(res.status).toBe(401);
+    });
+
+    it('a nonce is single-use', async () => {
+      const nonce = await mintNonce();
+      const first = await app.request(`/?token=${nonce}`, { headers: { host: HOST } });
+      expect(first.status).toBe(302);
+      const second = await app.request(`/?token=${nonce}`, { headers: { host: HOST } });
+      expect(second.status).toBe(401);
     });
 
     it('the resulting cookie authenticates a later HTML request', async () => {

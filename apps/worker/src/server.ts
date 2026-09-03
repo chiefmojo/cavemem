@@ -16,6 +16,7 @@ import { type EmbedLoopHandle, startEmbedLoop, stateFilePath } from './embed-loo
 import {
   allowedHostSet,
   bearerAuth,
+  createViewerSessionStore,
   getOrCreateToken,
   hostAllowlist,
   originCheck,
@@ -59,13 +60,20 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
     loop?.touch();
     await next();
   });
+  const viewerSessions = createViewerSessionStore();
   const isViewerPath = (path: string) => path === '/' || path.startsWith('/sessions/');
   app.use('*', async (c, next) => {
     const path = c.req.path;
     if (path === '/healthz') return next();
-    if (isViewerPath(path)) return viewerAuth(token)(c, next);
+    if (isViewerPath(path)) return viewerAuth(token, viewerSessions)(c, next);
     return bearerAuth(token)(c, next);
   });
+
+  // Bearer-protected like the rest of /api/*: mints the single-use nonce
+  // `cavemem viewer` puts in the handshake URL instead of the real token
+  // (security.ts — keeps the long-lived credential out of a spawned
+  // browser opener's argv and out of browser history).
+  app.post('/api/viewer-session', (c) => c.json({ token: viewerSessions.mint() }));
 
   // Stateless streamable HTTP: one server + transport per request, as the SDK
   // requires when sessionIdGenerator is undefined. Tool registration is five

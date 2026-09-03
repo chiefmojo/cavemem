@@ -152,17 +152,26 @@ export function registerLifecycleCommands(program: Command): void {
       const port = current.workerPort;
       // The worker requires bearer auth on every route now (server.ts);
       // browser navigation can't send an Authorization header, so the HTML
-      // routes trade this one-time query token for a cookie (viewerAuth) —
-      // read after waitForPidOrPort so the worker has had a chance to write
-      // worker-token on a cold start.
+      // routes trade a one-time nonce for a cookie (viewerAuth). The nonce
+      // — not the real worker-token — is what ends up in the opener's argv
+      // below (readable by any local user via `ps`/`/proc/<pid>/cmdline`),
+      // so it's minted fresh and single-use rather than being the durable
+      // credential itself: read after waitForPidOrPort so the worker has
+      // had a chance to write worker-token on a cold start.
       let url = `http://127.0.0.1:${port}`;
       try {
         const token = readFileSync(workerTokenPath(current.dataDir), 'utf8').trim();
         if (!token) throw new Error('worker-token file is empty');
-        url += `/?token=${encodeURIComponent(token)}`;
+        const res = await fetch(`http://127.0.0.1:${port}/api/viewer-session`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error(`worker returned ${res.status}`);
+        const { token: nonce } = (await res.json()) as { token: string };
+        url += `/?token=${encodeURIComponent(nonce)}`;
       } catch (err) {
         process.stdout.write(
-          `${kleur.red('could not read worker token')} — ${err instanceof Error ? err.message : String(err)}\n`,
+          `${kleur.red('could not start viewer session')} — ${err instanceof Error ? err.message : String(err)}\n`,
         );
         process.exitCode = 1;
         return;

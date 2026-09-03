@@ -115,16 +115,22 @@ echo "==> 13. MCP over HTTP rejects without bearer"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$PORT/mcp" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d "$INIT")
 test "$code" = "401" || { echo "expected 401, got $code"; exit 1; }
 
-echo "==> 14. viewer HTML requires the cookie handshake, not a bare GET"
+echo "==> 14. viewer HTML requires the cookie handshake, not a bare GET or the real token"
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/")
 test "$code" = "401" || { echo "expected bare GET / to 401, got $code"; exit 1; }
+code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/?token=$TOKEN")
+test "$code" = "401" || { echo "expected the real token to be rejected as a handshake nonce, got $code"; exit 1; }
+NONCE=$(curl -fs -X POST "http://127.0.0.1:$PORT/api/viewer-session" -H "Authorization: Bearer $TOKEN" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>console.log(JSON.parse(d).token))')
+test -n "$NONCE" || { echo "failed to mint a viewer-session nonce"; exit 1; }
 JAR="$WORK/cookies.txt"
-code=$(curl -s -o /dev/null -w '%{http_code}' -c "$JAR" "http://127.0.0.1:$PORT/?token=$TOKEN")
-test "$code" = "302" || { echo "expected token handshake to 302, got $code"; exit 1; }
+code=$(curl -s -o /dev/null -w '%{http_code}' -c "$JAR" "http://127.0.0.1:$PORT/?token=$NONCE")
+test "$code" = "302" || { echo "expected nonce handshake to 302, got $code"; exit 1; }
 grep -q "cavemem_viewer" "$JAR" || { echo "handshake did not set the viewer cookie"; cat "$JAR"; exit 1; }
 curl -fs -b "$JAR" "http://127.0.0.1:$PORT/" | grep -q "e2e-remote" || { echo "cookie did not authenticate the viewer"; exit 1; }
 code=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "http://127.0.0.1:$PORT/api/sessions")
 test "$code" = "401" || { echo "viewer cookie must not authenticate /api/*, got $code"; exit 1; }
+code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/?token=$NONCE")
+test "$code" = "401" || { echo "expected a reused nonce to 401, got $code"; exit 1; }
 
 echo "==> 15. spool on outage, drain on recovery"
 kill "$WORKER_PID"; wait "$WORKER_PID" 2>/dev/null || true; WORKER_PID=""

@@ -30,7 +30,7 @@ Cross-agent persistent memory for coding assistants. In the default local config
 - **Progressive MCP retrieval.** `search`, `timeline`, `get_observations` — agents filter before fetching.
 - **Hybrid search.** SQLite FTS5 keyword + local vector index, combined with a tunable ranker.
 - **Local by default.** The default local configuration makes no network calls. Remote embedding providers and web enrichment are opt-in, and opt-in remote mode sends hook and MCP traffic to a central worker.
-- **Web viewer.** Read-only UI at `http://localhost:37777` for browsing sessions in human-readable form. Token-protected: the worker generates a local bearer token on first start; `cavemem viewer` reads it and opens with a one-time handshake that trades it for a session cookie, so viewing still has zero friction while every route rejects requests without the token or cookie.
+- **Web viewer.** Read-only UI at `http://localhost:37777` for browsing sessions in human-readable form. Token-protected: the worker generates a local bearer token on first start; `cavemem viewer` uses it to mint a short-lived single-use nonce and opens the browser with a handshake that trades the nonce for a session cookie — the durable token itself never reaches a URL or a spawned browser process's arguments, so viewing still has zero friction while every route rejects requests without the token or cookie.
 - **Cross-IDE installers.** Claude Code, OpenCode, Codex, GitHub Copilot, Augment Code capture observations; Cursor, Gemini CLI, Antigravity, IBM Bob are query-only (MCP search over memory captured elsewhere) — one command each, see the [capability matrix](#install).
 - **Privacy-aware.** `<private>...</private>` stripped at write boundary. Path globs exclude whole directories.
 

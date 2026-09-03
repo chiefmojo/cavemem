@@ -99,12 +99,49 @@ export function bearerAuth(token: string): MiddlewareHandler {
 }
 
 export const VIEWER_COOKIE = 'cavemem_viewer';
+const VIEWER_SESSION_TTL_MS = 2 * 60 * 1000;
+
+/**
+ * Single-use, short-lived nonces that stand in for the real bearer token in
+ * the viewer handshake URL. Putting the *actual* worker-token in a URL means
+ * it lands in a spawned opener's argv (`ps`/`/proc/<pid>/cmdline` — readable
+ * by any local user, not just the one who ran `cavemem viewer`) and in
+ * browser history. A nonce is worthless once consumed or expired, so either
+ * exposure only leaks something already dead. In-memory only: worth nothing
+ * once the worker restarts, and there's no reason to persist a one-shot.
+ */
+export function createViewerSessionStore() {
+  const nonces = new Map<string, number>();
+  const prune = (now: number) => {
+    for (const [n, exp] of nonces) if (exp <= now) nonces.delete(n);
+  };
+  return {
+    mint(): string {
+      const now = Date.now();
+      prune(now);
+      const nonce = randomBytes(24).toString('hex');
+      nonces.set(nonce, now + VIEWER_SESSION_TTL_MS);
+      return nonce;
+    },
+    /** Consumes the nonce regardless of outcome — single-use either way. */
+    consume(nonce: string): boolean {
+      const exp = nonces.get(nonce);
+      nonces.delete(nonce);
+      return exp !== undefined && exp > Date.now();
+    },
+  };
+}
+
+export type ViewerSessionStore = ReturnType<typeof createViewerSessionStore>;
 
 /**
  * HTML routes can't carry an Authorization header on a top-level browser
- * navigation, so the viewer bootstraps once with `?token=`, trades it for a
- * session cookie, and redirects to the same path with the token stripped —
- * it never sits in the URL bar or browser history past that first hop.
+ * navigation, so the viewer bootstraps once with a one-time `?token=` nonce
+ * (minted via POST /api/viewer-session, bearer-protected like the rest of
+ * /api/*), trades it for a session cookie, and redirects to the same path
+ * with the nonce stripped — it never sits in the URL bar or browser history
+ * past that first hop, and the argv a spawned browser opener receives is
+ * likewise already-spent.
  *
  * Cookie auth is scoped to this middleware only; /api/* and /mcp stay on
  * bearerAuth, so a viewer tab's cookie can never be replayed against the
@@ -114,11 +151,11 @@ export const VIEWER_COOKIE = 'cavemem_viewer';
  * by design (docs/remote.md — no TLS). No `maxAge`: session-only, so the
  * credential never touches disk in the browser either.
  */
-export function viewerAuth(token: string): MiddlewareHandler {
+export function viewerAuth(token: string, sessions: ViewerSessionStore): MiddlewareHandler {
   return async (c, next) => {
     const supplied = c.req.query('token');
     if (supplied !== undefined) {
-      if (!tokenMatches(token, supplied)) return c.text('Unauthorized', 401);
+      if (!sessions.consume(supplied)) return c.text('Unauthorized', 401);
       setCookie(c, VIEWER_COOKIE, token, {
         httpOnly: true,
         sameSite: 'Strict',
