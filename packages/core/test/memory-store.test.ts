@@ -68,3 +68,20 @@ describe('MemoryStore.addSummary — secret redaction (#49)', () => {
     store.close();
   });
 });
+
+describe('MemoryStore.startSession — metadata', () => {
+  it('persists metadata as JSON on the session row', () => {
+    const store = new MemoryStore({ dbPath: join(dir, 'm.db'), settings: defaultSettings });
+    store.startSession({ id: 's-meta', ide: 'test', cwd: null, metadata: { host: 'wintermute' } });
+    const row = store.storage.getSession('s-meta');
+    expect(row?.metadata).toBe(JSON.stringify({ host: 'wintermute' }));
+    store.close();
+  });
+
+  it('leaves metadata null when omitted', () => {
+    const store = new MemoryStore({ dbPath: join(dir, 'n.db'), settings: defaultSettings });
+    store.startSession({ id: 's-nometa', ide: 'test', cwd: null });
+    expect(store.storage.getSession('s-nometa')?.metadata).toBeNull();
+    store.close();
+  });
+});

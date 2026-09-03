@@ -28,13 +28,18 @@ export class MemoryStore {
 
   // --- sessions ---
 
-  startSession(p: { id: string; ide: string; cwd: string | null }): void {
+  startSession(p: {
+    id: string;
+    ide: string;
+    cwd: string | null;
+    metadata?: Record<string, unknown> | null;
+  }): void {
     this.storage.createSession({
       id: p.id,
       ide: p.ide,
       cwd: p.cwd,
       started_at: Date.now(),
-      metadata: null,
+      metadata: p.metadata ? JSON.stringify(p.metadata) : null,
     });
   }
 
