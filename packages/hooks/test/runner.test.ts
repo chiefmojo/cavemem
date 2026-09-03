@@ -380,6 +380,24 @@ describe('runHook — remote mode', () => {
     expect(existsSync(join(home, 'spool.jsonl'))).toBe(false);
   });
 
+  it('fails open without a request when remote.url is not a central-worker base', async () => {
+    writeFileSync(
+      join(home, 'settings.json'),
+      JSON.stringify({
+        remote: { url: 'http://neuromancer:37777/base', token: 'tok', timeoutMs: 200 },
+        embedding: { provider: 'none' },
+      }),
+    );
+    const f = vi.fn();
+    vi.stubGlobal('fetch', f);
+
+    const r = await remoteRunHook('user-prompt-submit', { session_id: 'r-invalid', prompt: 'hi' });
+
+    expect(r.ok).toBe(true);
+    expect(f).not.toHaveBeenCalled();
+    expect(existsSync(join(home, 'spool.jsonl'))).toBe(false);
+  });
+
   it('drains the spool after a successful hook', async () => {
     vi.stubGlobal(
       'fetch',

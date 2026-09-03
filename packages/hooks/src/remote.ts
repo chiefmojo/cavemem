@@ -14,12 +14,12 @@ export class RemoteAuthError extends Error {
   }
 }
 
-/** Null in local mode. Trailing slash stripped so path joins are predictable. */
+/** Null in local mode. Remote targets are canonical central-worker base URLs. */
 export function remoteTarget(settings: Settings): RemoteTarget | null {
   const url = settings.remote.url;
   if (!url) return null;
   return {
-    url: url.replace(/\/+$/, ''),
+    url: canonicalRemoteUrl(url),
     token: settings.remote.token,
     timeoutMs: settings.remote.timeoutMs,
   };
@@ -35,10 +35,11 @@ export async function postHook(
   input: HookInput,
   fetchImpl: typeof fetch = fetch,
 ): Promise<HookResult> {
+  const endpoint = new URL(`api/hooks/${name}`, `${canonicalRemoteUrl(target.url)}/`).href;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), target.timeoutMs);
   try {
-    const res = await fetchImpl(`${target.url}/api/hooks/${name}`, {
+    const res = await fetchImpl(endpoint, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -53,4 +54,28 @@ export async function postHook(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function canonicalRemoteUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw invalidRemoteUrl();
+  }
+  if (
+    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+    url.pathname !== '/' ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
+    throw invalidRemoteUrl();
+  }
+  return url.origin;
+}
+
+function invalidRemoteUrl(): Error {
+  return new Error(
+    'remote.url must be an http(s) central-worker base URL with no path, query, or fragment',
+  );
 }

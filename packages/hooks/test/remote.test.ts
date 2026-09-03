@@ -1,5 +1,5 @@
 import { defaultSettings } from '@cavemem/config';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RemoteAuthError, postHook, remoteTarget } from '../src/remote.js';
 
 const target = { url: 'http://neuromancer:37777', token: 'tok', timeoutMs: 200 };
@@ -33,6 +33,19 @@ describe('remoteTarget', () => {
     });
     expect(t).toEqual({ url: 'http://neuromancer:37777', token: 'x', timeoutMs: 999 });
   });
+
+  it.each([
+    'http://neuromancer:37777/base',
+    'http://neuromancer:37777/?mode=remote',
+    'http://neuromancer:37777/#worker',
+  ])('rejects a non-root central-worker base: %s', (url) => {
+    expect(() =>
+      remoteTarget({
+        ...defaultSettings,
+        remote: { url, token: 'x', timeoutMs: 999 },
+      }),
+    ).toThrow(/central-worker base URL/);
+  });
 });
 
 describe('postHook', () => {
@@ -51,6 +64,14 @@ describe('postHook', () => {
     expect(seenAuth).toBe('Bearer tok');
     expect(JSON.parse(seenBody).session_id).toBe('s1');
     expect(r).toEqual({ ok: true, ms: 3, context: 'ctx' });
+  });
+
+  it('rejects a non-root target before making a request', async () => {
+    const f = vi.fn();
+    await expect(
+      postHook({ ...target, url: `${target.url}/base` }, 'stop', { session_id: 's' }, f),
+    ).rejects.toThrow(/central-worker base URL/);
+    expect(f).not.toHaveBeenCalled();
   });
 
   it('throws RemoteAuthError on 401', async () => {

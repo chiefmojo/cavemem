@@ -37,7 +37,18 @@ export async function runHook(
     store = opts.store;
   } else {
     const settings = loadSettings();
-    const target = remoteTarget(settings);
+    let target: RemoteTarget | null;
+    try {
+      target = remoteTarget(settings);
+    } catch (err) {
+      logRemote({
+        hook: name,
+        ok: false,
+        reason: 'invalid-target',
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { ok: true, ms: Math.round(performance.now() - start) };
+    }
     if (target) return runRemote(target, settings, name, input, start);
     settingsForSpawn = settings;
     const dbPath = join(resolveDataDir(settings.dataDir), 'data.db');
