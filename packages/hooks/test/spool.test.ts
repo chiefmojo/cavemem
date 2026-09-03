@@ -60,6 +60,28 @@ describe('spool', () => {
     expect(spoolDepth(path)).toBe(1);
   });
 
+  it('preserves a budget-exhausted remainder for the next drain', async () => {
+    for (let i = 0; i < 5; i++) appendSpool(path, entry(i));
+    const sent: number[] = [];
+    const n = await drainSpool(
+      path,
+      async (e) => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        sent.push(e.ts);
+      },
+      10,
+      50,
+    );
+
+    expect(n).toBeLessThan(5);
+    expect(spoolDepth(path)).toBe(5 - n);
+    await drainSpool(path, async (e) => {
+      sent.push(e.ts);
+    });
+    expect(spoolDepth(path)).toBe(0);
+    expect(sent).toEqual([0, 1, 2, 3, 4]);
+  });
+
   it('stops at the first failure and keeps the remainder', async () => {
     for (let i = 0; i < 3; i++) appendSpool(path, entry(i));
     const n = await drainSpool(path, async (e) => {

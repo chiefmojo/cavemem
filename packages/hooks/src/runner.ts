@@ -9,7 +9,7 @@ import { sessionStart } from './handlers/session-start.js';
 import { stop } from './handlers/stop.js';
 import { userPromptSubmit } from './handlers/user-prompt-submit.js';
 import { RemoteAuthError, type RemoteTarget, postHook, remoteTarget } from './remote.js';
-import { appendSpool, drainSpool, spoolPath } from './spool.js';
+import { SPOOL_DRAIN_MAX, appendSpool, drainSpool, spoolPath } from './spool.js';
 import type { HookInput, HookName, HookResult } from './types.js';
 
 export interface RunHookOptions {
@@ -116,8 +116,11 @@ async function runRemote(
   const spool = spoolPath(settings);
   try {
     const result = await postHook(target, name, input);
-    const drained = await drainSpool(spool, (e) =>
-      postHook(target, e.name, e.input).then(() => {}),
+    const drained = await drainSpool(
+      spool,
+      (e) => postHook(target, e.name, e.input).then(() => {}),
+      SPOOL_DRAIN_MAX,
+      target.timeoutMs * 2,
     );
     if (drained > 0) logRemote({ hook: name, drained });
     return { ...result, ms: ms() };

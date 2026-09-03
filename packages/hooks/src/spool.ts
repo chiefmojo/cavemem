@@ -71,6 +71,7 @@ export async function drainSpool(
   path: string,
   send: (entry: SpoolEntry) => Promise<void>,
   max = SPOOL_DRAIN_MAX,
+  budgetMs?: number,
 ): Promise<number> {
   if (!existsSync(path)) return 0;
   const lock = tryAcquireLock(path);
@@ -80,7 +81,9 @@ export async function drainSpool(
     if (lines.length === 0) return 0;
     let processed = 0;
     let sent = 0;
+    const deadline = budgetMs === undefined ? Number.POSITIVE_INFINITY : Date.now() + budgetMs;
     for (const line of lines.slice(0, max)) {
+      if (Date.now() >= deadline) break;
       let entry: SpoolEntry;
       try {
         entry = JSON.parse(line) as SpoolEntry;

@@ -32,6 +32,7 @@ The central server should set `workerHost` to `"0.0.0.0"`, provide a non-empty `
 | 401 | Emit a remote failure line with `reason: "auth"` plus normal hook telemetry, no spool (replay would fail identically), exit 0. |
 | `remote.url` set, token missing | No POST. Emit a remote failure line with `reason: "no-token"` plus normal hook telemetry, exit 0. `doctor` reports it. |
 | Spool replay fails mid-drain | Stop, keep remainder, retry on next successful hook. |
+| Server is slow but responsive during replay | Stop when the batch's `2 × remote.timeoutMs` budget is exhausted; preserve the remainder for the next successful hook. A send already in flight may overrun that budget by up to one `remote.timeoutMs` to avoid replaying a request the server may have committed. |
 | Worker restart | systemd `Restart=on-failure`. Clients spool during the gap and drain after. |
 | Unknown `:event` on `/api/hooks` | 400 with a JSON error body. |
 | Hook handler throws server-side | `runHook` already returns `{ ok: false, error }`; returned as 200 with that body so the client logs it rather than spooling a poison payload. |
