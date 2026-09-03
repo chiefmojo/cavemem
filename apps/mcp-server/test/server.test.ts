@@ -110,3 +110,26 @@ describe('MCP server', () => {
     expect(res.isError).toBe(true);
   });
 });
+
+describe('buildServer embedder injection', () => {
+  it('uses the injected embedder instead of loading one', async () => {
+    const calls: string[] = [];
+    const fake = {
+      model: 'fake',
+      dim: 3,
+      embed: async (text: string) => {
+        calls.push(text);
+        return new Float32Array([1, 0, 0]);
+      },
+    };
+    const server = buildServer(store, defaultSettings, { embedder: fake });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const c = new Client({ name: 't', version: '0' });
+    await Promise.all([server.connect(st), c.connect(ct)]);
+    const { a } = await seed();
+    store.storage.putEmbedding(a, fake.model, new Float32Array([1, 0, 0]));
+    await c.callTool({ name: 'search', arguments: { query: 'cargo' } });
+    expect(calls.length).toBeGreaterThan(0);
+    await c.close();
+  });
+});
