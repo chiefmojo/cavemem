@@ -135,7 +135,7 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
     return c.json(result);
   });
 
-  app.get('/', (c) => c.html(renderIndex(store.storage.listSessions(50), token)));
+  app.get('/', (c) => c.html(renderIndex(store.storage.listSessions(50))));
   app.get('/sessions/:id', (c) => {
     const id = c.req.param('id');
     const session = store.storage.getSession(id);
@@ -145,7 +145,6 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
       renderSession(
         session,
         obs.map((r) => ({ ...r, content: expand(r.content) })),
-        token,
       ),
     );
   });

@@ -179,18 +179,18 @@ describe('worker HTTP', () => {
     });
   });
 
-  describe('viewer HTML token injection', () => {
-    it('embeds the token as window.__CAVEMEM_TOKEN__ on the index page', async () => {
+  describe('viewer HTML credential exposure', () => {
+    it('does not embed the bearer token on the index page', async () => {
       const res = await apiReq('/');
       const body = await res.text();
-      expect(body).toContain(`window.__CAVEMEM_TOKEN__=${JSON.stringify(TOKEN)}`);
+      expect(body).not.toContain(TOKEN);
     });
 
-    it('embeds the token on a session page', async () => {
+    it('does not embed the bearer token on a session page', async () => {
       seed();
       const res = await apiReq('/sessions/s1');
       const body = await res.text();
-      expect(body).toContain(`window.__CAVEMEM_TOKEN__=${JSON.stringify(TOKEN)}`);
+      expect(body).not.toContain(TOKEN);
     });
   });
 
