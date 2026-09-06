@@ -160,7 +160,17 @@ export class Storage {
     return this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as SessionRow | undefined;
   }
 
-  listSessions(limit = 50): SessionRow[] {
+  /**
+   * Most recent sessions, newest first. An optional `opts.cwd` pushes the
+   * scoping into SQL (WP #209): filtering a machine-wide window in JS let 20
+   * unrelated recent sessions evict the caller's project from the window.
+   */
+  listSessions(limit = 50, opts: { cwd?: string | null } = {}): SessionRow[] {
+    if (opts.cwd) {
+      return this.db
+        .prepare('SELECT * FROM sessions WHERE cwd = ? ORDER BY started_at DESC LIMIT ?')
+        .all(opts.cwd, limit) as SessionRow[];
+    }
     return this.db
       .prepare('SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?')
       .all(limit) as SessionRow[];

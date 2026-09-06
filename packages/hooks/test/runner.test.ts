@@ -168,6 +168,78 @@ describe('runHook', () => {
     expect(r.context).not.toContain('noise from other project');
   });
 
+  it('session-start surfaces same-cwd context even when other projects fill the recency window (WP #209)', async () => {
+    // One summarized session in /proj/a, then 20 summarized sessions in
+    // /proj/b. The machine-wide fetch must not evict /proj/a's history from
+    // the 20-session window — cwd scoping happens in SQL, not in JS after.
+    await runHook(
+      'session-start',
+      { session_id: 'old-a', ide: 'claude-code', cwd: '/proj/a', source: 'startup' },
+      { store },
+    );
+    await runHook(
+      'stop',
+      { session_id: 'old-a', ide: 'claude-code', turn_summary: 'alpha project work' },
+      { store },
+    );
+
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 2));
+      const id = `noise-${i}`;
+      await runHook(
+        'session-start',
+        { session_id: id, ide: 'claude-code', cwd: '/proj/b', source: 'startup' },
+        { store },
+      );
+      await runHook(
+        'stop',
+        { session_id: id, ide: 'claude-code', turn_summary: `beta project work ${i}` },
+        { store },
+      );
+    }
+
+    await new Promise((r) => setTimeout(r, 2));
+    const r = await runHook(
+      'session-start',
+      { session_id: 'new-a', ide: 'claude-code', cwd: '/proj/a', source: 'startup' },
+      { store },
+    );
+    expect(r.context).toContain('alpha project work');
+  });
+
+  it('session-start skips summary-less candidates instead of consuming hint slots (WP #209)', async () => {
+    // One older summarized session, then three newer same-cwd sessions with
+    // no summaries. The newer ones must be skipped, not slice off all three
+    // hint slots before the summarized session is ever considered.
+    await runHook(
+      'session-start',
+      { session_id: 'older-c', ide: 'claude-code', cwd: '/proj/c', source: 'startup' },
+      { store },
+    );
+    await runHook(
+      'stop',
+      { session_id: 'older-c', ide: 'claude-code', turn_summary: 'older summarized work' },
+      { store },
+    );
+
+    for (let i = 0; i < 3; i++) {
+      await new Promise((r) => setTimeout(r, 2));
+      await runHook(
+        'session-start',
+        { session_id: `bare-${i}`, ide: 'claude-code', cwd: '/proj/c', source: 'startup' },
+        { store },
+      );
+    }
+
+    await new Promise((r) => setTimeout(r, 2));
+    const r = await runHook(
+      'session-start',
+      { session_id: 'new-c', ide: 'claude-code', cwd: '/proj/c', source: 'startup' },
+      { store },
+    );
+    expect(r.context).toContain('older summarized work');
+  });
+
   it('session-start is idempotent across resume/clear/compact', async () => {
     const a = await runHook(
       'session-start',

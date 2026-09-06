@@ -70,6 +70,42 @@ describe('Storage (bun:sqlite backend)', () => {
     expect(found).toBe(true);
   });
 
+  it('listSessions accepts a cwd filter and returns only that cwd in recency order', () => {
+    // Explicit started_at values keep ORDER BY started_at DESC deterministic.
+    const base = Date.now() + 10_000; // after any session created by earlier tests
+    storage.createSession({
+      id: 'cwd-a-old',
+      ide: 'test',
+      cwd: '/proj/a',
+      started_at: base,
+      metadata: null,
+    });
+    storage.createSession({
+      id: 'cwd-b-1',
+      ide: 'test',
+      cwd: '/proj/b',
+      started_at: base + 1,
+      metadata: null,
+    });
+    storage.createSession({
+      id: 'cwd-b-2',
+      ide: 'test',
+      cwd: '/proj/b',
+      started_at: base + 2,
+      metadata: null,
+    });
+    storage.createSession({
+      id: 'cwd-a-new',
+      ide: 'test',
+      cwd: '/proj/a',
+      started_at: base + 3,
+      metadata: null,
+    });
+
+    const a = storage.listSessions(10, { cwd: '/proj/a' });
+    expect(a.map((s) => s.id)).toEqual(['cwd-a-new', 'cwd-a-old']);
+  });
+
   it('supports readonly mode: reads existing data and rejects writes', () => {
     const ro = new Storage(DB_PATH, { readonly: true });
     expect(ro.countObservations()).toBeGreaterThan(0);

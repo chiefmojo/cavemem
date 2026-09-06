@@ -13,18 +13,21 @@ export async function sessionStart(store: MemoryStore, input: HookInput): Promis
   // For resume/clear/compact the agent already has its own context; injecting
   // a "Prior-session context" preface would be noisy and possibly stale.
   if (input.source && input.source !== 'startup') return '';
-  // Widen the initial fetch so we have headroom after cwd filtering; without
-  // this we'd routinely return zero hints for a project that hasn't been the
-  // most recent on the machine. (See #39.)
-  const recent = store.storage.listSessions(20);
-  const hints = recent
-    .filter((s) => s.id !== input.session_id && (!input.cwd || s.cwd === input.cwd))
-    .slice(0, 3)
-    .map((s) => {
-      const summaries = store.storage.listSummaries(s.id).slice(0, 1);
-      return summaries.map((x) => x.content).join('\n');
-    })
-    .filter(Boolean);
+  // Scope the fetch to the current cwd in SQL (WP #209): a machine-wide
+  // window with JS-side filtering let 20 unrelated recent sessions evict this
+  // project's history, silently yielding zero hints. Headroom is still 20
+  // within the project, and summary-less candidates are skipped before the
+  // 3-hint cap so newer bare sessions can't crowd out a summarized one.
+  // (See #39.)
+  const recent = store.storage.listSessions(20, { cwd: input.cwd ?? null });
+  const hints: string[] = [];
+  for (const s of recent) {
+    if (s.id === input.session_id) continue;
+    const summary = store.storage.listSummaries(s.id)[0];
+    if (!summary) continue;
+    hints.push(summary.content);
+    if (hints.length === 3) break;
+  }
   if (hints.length === 0) return '';
   return `## Prior-session context\n${hints.join('\n---\n')}`;
 }
