@@ -96,6 +96,20 @@ describe('Storage', () => {
     expect(scopedB[0]?.session_id).toBe('proj-B');
   });
 
+  it('listSessions({ cwd: "" }) scopes to empty-cwd sessions, not machine-wide (#209)', () => {
+    // '' is a real cwd value (a session recorded with an empty working
+    // directory) — it must scope by exact match, not fall through to the
+    // machine-wide query. Explicit started_at keeps ORDER BY ... DESC deterministic.
+    const t = Date.now();
+    storage.createSession({ id: 'empty-1', ide: 'test', cwd: '', started_at: t, metadata: null });
+    storage.createSession({ id: 'x-1', ide: 'test', cwd: '/x', started_at: t + 1, metadata: null });
+    storage.createSession({ id: 'empty-2', ide: 'test', cwd: '', started_at: t + 2, metadata: null });
+
+    expect(storage.listSessions(10, { cwd: '' }).map((s) => s.id)).toEqual(['empty-2', 'empty-1']);
+    // undefined opts.cwd stays machine-wide — all three rows.
+    expect(storage.listSessions(10)).toHaveLength(3);
+  });
+
   it('stores and retrieves embeddings', () => {
     storage.createSession({
       id: 's2',
