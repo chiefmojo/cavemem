@@ -5,6 +5,43 @@ real `~/.cavemem/data.db`, real agent sessions) — as opposed to hacking on the
 code. If you just want a dev build that tracks the working tree, use the
 `pnpm link --global` flow in `development.md` instead.
 
+## Toolchain
+
+Three tools do the work. Building needs all three; installing a prebuilt
+tarball needs only `node` + `npm`.
+
+| Tool | On wintermute | What it is |
+|------|---------------|------------|
+| `node` | `/usr/bin/node` (system package, v22) | the JavaScript runtime everything runs on |
+| `npm` | ships inside Node | installs packages; used here for the global tarball install |
+| `pnpm` | `~/.local/bin/pnpm` — a two-line shim | the workspace/monorepo package manager; only needed to *build* |
+
+`pnpm` is **not really installed** on wintermute. `~/.local/bin/pnpm` is a
+hand-written shim:
+
+```sh
+#!/bin/sh
+exec npx -y pnpm@9 "$@"
+```
+
+Every `pnpm …` call is `npx` fetching and running `pnpm@9` (npm caches it after
+the first run). The `"packageManager": "pnpm@9.x"` line in `package.json` is
+bypassed by this — the shim always takes `@9` latest.
+
+On a fresh box, recreate it before the first build:
+
+```sh
+mkdir -p ~/.local/bin
+printf '#!/bin/sh\nexec npx -y pnpm@9 "$@"\n' > ~/.local/bin/pnpm
+chmod +x ~/.local/bin/pnpm
+```
+
+(`corepack enable pnpm` or `npm i -g pnpm@9` work too — the shim is just what
+this machine happens to use.)
+
+The **server box does not need `pnpm` at all** — the tarball is built here and
+copied over; neuromancer only runs `npm install -g` (see `deploy/README.md`).
+
 ## The npm background, in plain terms
 
 **The published `cavemem` on the npm registry is not ours.** `npm install -g
