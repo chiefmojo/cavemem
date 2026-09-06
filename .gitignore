@@ -21,3 +21,5 @@ apps/cli/release/
 
 # Claude Code session artifacts (agent worktrees, settings)
 .claude/
+
+.opencode/
