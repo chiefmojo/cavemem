@@ -240,6 +240,39 @@ describe('runHook', () => {
     expect(r.context).toContain('older summarized work');
   });
 
+  it('session-start does not reach back past the scan cap for summarized history', async () => {
+    // One old summarized session, then 10 newer same-cwd sessions with no
+    // summaries. The scan cap (10 most-recent candidates) bounds staleness:
+    // the old summary sits beyond the cap and must not be injected.
+    await runHook(
+      'session-start',
+      { session_id: 'ancient', ide: 'claude-code', cwd: '/proj/d', source: 'startup' },
+      { store },
+    );
+    await runHook(
+      'stop',
+      { session_id: 'ancient', ide: 'claude-code', turn_summary: 'too old to inject' },
+      { store },
+    );
+
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 2));
+      await runHook(
+        'session-start',
+        { session_id: `stale-${i}`, ide: 'claude-code', cwd: '/proj/d', source: 'startup' },
+        { store },
+      );
+    }
+
+    await new Promise((r) => setTimeout(r, 2));
+    const r = await runHook(
+      'session-start',
+      { session_id: 'now-d', ide: 'claude-code', cwd: '/proj/d', source: 'startup' },
+      { store },
+    );
+    expect(r.context).toBe('');
+  });
+
   it('session-start is idempotent across resume/clear/compact', async () => {
     const a = await runHook(
       'session-start',

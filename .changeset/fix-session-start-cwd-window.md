@@ -15,3 +15,6 @@ fixed N. The `cwd` filter is now pushed into SQL via
 Additionally, the 3-hint cap previously ran **before** summary-less
 candidates were dropped, so three bare sessions could crowd out an older
 summarized one; summary-less candidates are now skipped before the cap.
+The hint scan is additionally bounded to the 10 most-recent same-cwd
+sessions, so injected context can no longer reach arbitrarily far back past
+summary-less recent sessions.
