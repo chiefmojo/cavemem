@@ -1,7 +1,10 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
+  realpathSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -43,6 +46,44 @@ function pluginLink(ctx: InstallContext): string {
 // uninstall so users don't end up with stale files.
 function legacyConfigFile(ctx: InstallContext): string {
   return join(ctx.ideConfigDir, '.opencode', 'config.json');
+}
+
+/** Foreign bridge: a plugin in the OpenCode plugins dir that talks to cavemem but isn't our symlinked bridge. */
+export function findForeignBridges(pluginsDir: string, bridgeSource: string): string[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(pluginsDir);
+  } catch {
+    return [];
+  }
+  // realpath(bridgeSource) once: pnpm/npm installs can put symlinks between
+  // the plugins dir and the real bridge file, and a missing bridgeSource must
+  // not fail the whole scan.
+  let realSource: string | null = null;
+  try {
+    realSource = realpathSync(bridgeSource);
+  } catch {
+    realSource = null;
+  }
+  const hits: string[] = [];
+  for (const name of entries) {
+    if (name === 'cavemem.js' || !/\.(js|mjs|cjs)$/.test(name)) continue;
+    const full = join(pluginsDir, name);
+    try {
+      if (
+        realSource !== null &&
+        lstatSync(full).isSymbolicLink() &&
+        realpathSync(full) === realSource
+      ) {
+        // Our own bridge re-linked under a different name — same code, harmless.
+        continue;
+      }
+      if (readFileSync(full, 'utf8').toLowerCase().includes('cavemem')) hits.push(full);
+    } catch {
+      // Unreadable or binary — treat as not-a-bridge rather than failing install.
+    }
+  }
+  return hits;
 }
 
 export const openCode: Installer = {
@@ -103,6 +144,16 @@ export const openCode: Installer = {
     }
     symlinkSync(bridgeSource, link);
     messages.push(`symlinked bridge plugin ${link} -> ${bridgeSource}`);
+
+    // OpenCode loads every file in plugins/, so a stale hand-written bridge
+    // that also references cavemem runs alongside ours and misses turn_summary
+    // — silently disabling turn summaries. Warn; never delete user files from
+    // a non-interactive CLI.
+    for (const p of findForeignBridges(pluginsDir, bridgeSource)) {
+      messages.push(
+        `warning: foreign bridge plugin ${p} also references cavemem — it may shadow ${link}; OpenCode loads it too and stale bridges miss turn_summary. Remove or replace it.`,
+      );
+    }
 
     // 3. Clean up legacy config if it still has a stale mcpServers entry.
     const legacyFile = legacyConfigFile(ctx);

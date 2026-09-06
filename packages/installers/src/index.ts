@@ -12,3 +12,4 @@ export {
   type CheckWindowsShOptions,
 } from './windows-sh.js';
 export { CODEX_TOKEN_ENV } from './codex.js';
+export { findForeignBridges } from './opencode.js';

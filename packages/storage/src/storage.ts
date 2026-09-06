@@ -285,6 +285,26 @@ export class Storage {
       .all(sessionId) as SummaryRow[];
   }
 
+  /**
+   * Turn-summary coverage per IDE — sessions vs turn-scoped summaries. An IDE
+   * with sessions but zero summaries is silently losing turn_summary (e.g. a
+   * stale bridge plugin), so `doctor`/`status` surface the gap. Session-scope
+   * rollups are a different signal and deliberately not counted here.
+   */
+  summaryCoverage(): Array<{ ide: string; sessions: number; summaries: number }> {
+    return this.db
+      .prepare(
+        `SELECT s.ide AS ide,
+                COUNT(DISTINCT s.id) AS sessions,
+                COUNT(m.id) AS summaries
+         FROM sessions s
+         LEFT JOIN summaries m ON m.session_id = s.id AND m.scope = 'turn'
+         GROUP BY s.ide
+         ORDER BY s.ide`,
+      )
+      .all() as Array<{ ide: string; sessions: number; summaries: number }>;
+  }
+
   // --- search (BM25 via FTS5) ---
 
   // Rebuilds the FTS5 index from the observations table. Goes through

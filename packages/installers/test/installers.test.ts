@@ -6,6 +6,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,7 +21,7 @@ import { codex } from '../src/codex.js';
 import { copilot } from '../src/copilot.js';
 import { cursor } from '../src/cursor.js';
 import { deepMerge } from '../src/fs-utils.js';
-import { openCode } from '../src/opencode.js';
+import { findForeignBridges, openCode } from '../src/opencode.js';
 import { getInstaller, installers } from '../src/registry.js';
 import type { InstallContext } from '../src/types.js';
 import { checkWindowsSh, resolveShDefault } from '../src/windows-sh.js';
@@ -497,6 +498,46 @@ describe('opencode installer', () => {
     expect(cfg.plugin).toContain('file://./plugins/cavemem.js');
 
     expect(existsSync(pluginPath())).toBe(true);
+  });
+
+  it('warns about a foreign bridge plugin that references cavemem', async () => {
+    const plugins = join(home, '.config', 'opencode', 'plugins');
+    mkdirSync(plugins, { recursive: true });
+    writeFileSync(
+      join(plugins, 'my-memory-hook.js'),
+      '// hand-written: shells out to cavemem hook\n',
+    );
+
+    const messages = await openCode.install(ctx);
+
+    expect(
+      messages.some((m) => m.includes('foreign bridge plugin') && m.includes('my-memory-hook.js')),
+    ).toBe(true);
+  });
+
+  it('does not flag the cavemem.js symlink or plugins unrelated to cavemem', async () => {
+    const plugins = join(home, '.config', 'opencode', 'plugins');
+    mkdirSync(plugins, { recursive: true });
+    writeFileSync(join(plugins, 'unrelated.js'), 'export default { name: "other" };\n');
+
+    const messages = await openCode.install(ctx);
+
+    expect(messages.some((m) => m.includes('foreign bridge plugin'))).toBe(false);
+  });
+
+  it('does not flag a second symlink to the same bridge source under a different name', async () => {
+    const plugins = join(home, '.config', 'opencode', 'plugins');
+    mkdirSync(plugins, { recursive: true });
+    const bridgeSource = join(home, 'cavemem', 'dist', 'opencodeBridge.js');
+    symlinkSync(bridgeSource, join(plugins, 'alias.js'));
+
+    const messages = await openCode.install(ctx);
+
+    expect(messages.some((m) => m.includes('foreign bridge plugin'))).toBe(false);
+  });
+
+  it('findForeignBridges returns [] for a missing plugins dir', () => {
+    expect(findForeignBridges(join(home, 'nope', 'plugins'), join(home, 'bridge.js'))).toEqual([]);
   });
 
   it('migrates a stale mcpServers.cavemem entry out of the modern config file on install', async () => {
