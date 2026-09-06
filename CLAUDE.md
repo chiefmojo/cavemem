@@ -12,9 +12,11 @@ Runtime state (`settings.json`, `data.db`, models, logs) lives in the resolved c
 
 Commands, merge gates, coding style, and PR conventions live in `AGENTS.md` — this file covers architecture, invariants, and rationale.
 
-## Fork status
+## Repository status
 
-Upstream `JuliusBrussee/cavemem` is frozen (Aug 2026); its compressed-memory core was slated to continue inside `caveman`. `chiefmojo/cavemem` (this checkout, `origin`) is now the active home — develop here directly. There is **no upstream contribution flow**: no PRs back to `JuliusBrussee`, so no PR-content scrub hooks, no contribution rubric, no "what would upstream want" lens. That makes this different from `hermes-agent-contrib` / `MemOS-contrib`, which do track upstream.
+Standalone repo — `chiefmojo/cavemem` (`origin`) is the only home. Detached from the GitHub fork network 2026-09-06, `upstream` remote removed: `JuliusBrussee/cavemem` was a dead end (frozen Aug 2026; its compressed-memory core was slated to move into `caveman`), and the fork link kept making `gh` default ambiguous repo ops to that parent.
+
+Develop here directly. There is **no upstream contribution flow** — no PRs back to `JuliusBrussee`, so no PR-content scrub hooks, no contribution rubric, no "what would upstream want" lens. Different from `hermes-agent-contrib` / `MemOS-contrib`, which do track upstream.
 
 Current line of work — a shared LAN memory server replacing the coding agents' flat-file memory layer — is specced in `companion-ops/specs/2026-09-02-cavemem-shared-memory-server.md`.
 

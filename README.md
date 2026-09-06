@@ -6,17 +6,17 @@
 
 **why agent forget when agent can remember**
 
-[![npm](https://img.shields.io/npm/v/cavemem?style=flat&color=yellow)](https://www.npmjs.com/package/cavemem) [![Stars](https://img.shields.io/github/stars/JuliusBrussee/cavemem?style=flat&color=yellow)](https://github.com/JuliusBrussee/cavemem/stargazers) [![Last Commit](https://img.shields.io/github/last-commit/JuliusBrussee/cavemem?style=flat)](https://github.com/JuliusBrussee/cavemem/commits/main) [![License](https://img.shields.io/github/license/JuliusBrussee/cavemem?style=flat)](LICENSE)
+[![npm](https://img.shields.io/npm/v/cavemem?style=flat&color=yellow)](https://www.npmjs.com/package/cavemem) [![Stars](https://img.shields.io/github/stars/chiefmojo/cavemem?style=flat&color=yellow)](https://github.com/chiefmojo/cavemem/stargazers) [![Last Commit](https://img.shields.io/github/last-commit/chiefmojo/cavemem?style=flat)](https://github.com/chiefmojo/cavemem/commits/main) [![License](https://img.shields.io/github/license/chiefmojo/cavemem?style=flat)](LICENSE)
 
 [Install](#install) • [How it works](#how-it-works) • [CLI](#cli) • [MCP](#mcp) • [Settings](#settings)
 
 </div>
 
-> **Status: frozen (August 2026).** cavemem is no longer in active development.
-> Everything below still installs and works, but expect no new features or
-> fixes. Its compressed-memory core lives on inside
-> [caveman](https://github.com/JuliusBrussee/caveman) — the actively developed
-> home of the family, alongside
+> **Fork.** Upstream [`JuliusBrussee/cavemem`](https://github.com/JuliusBrussee/cavemem)
+> froze in August 2026. This repo (`chiefmojo/cavemem`) is a detached fork carried
+> forward for its own use — active, but with no contribution flow back upstream.
+> The wider caveman family lives on in
+> [caveman](https://github.com/JuliusBrussee/caveman) and
 > [caveman-browse](https://github.com/JuliusBrussee/caveman-browse).
 
 ---
@@ -192,7 +192,7 @@ Four tools. One philosophy: **agent do more with less**.
 | Repo | What | One-liner |
 |------|------|-----------|
 | [**caveman**](https://github.com/JuliusBrussee/caveman) | Output compression skill | *why use many token when few do trick* — ~75% fewer output tokens across Claude Code, Cursor, Gemini, Codex |
-| [**cavemem**](https://github.com/JuliusBrussee/cavemem) *(you are here)* | Cross-agent persistent memory | *why agent forget when agent can remember* — compressed SQLite + MCP, local by default |
+| [**cavemem**](https://github.com/chiefmojo/cavemem) *(you are here)* | Cross-agent persistent memory | *why agent forget when agent can remember* — compressed SQLite + MCP, local by default |
 | [**cavekit**](https://github.com/JuliusBrussee/cavekit) | Spec-driven autonomous build loop | *why agent guess when agent can know* — natural language → kits → parallel build → verified |
 | [**cavegemma**](https://github.com/JuliusBrussee/finetune-caveman) | Gemma 4 31B fine-tuned on caveman pairs | *why prompt every turn when weight remember* — LoRA + merged bf16 on HF, no system prompt needed |
 
