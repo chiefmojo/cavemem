@@ -540,6 +540,30 @@ describe('opencode installer', () => {
     expect(findForeignBridges(join(home, 'nope', 'plugins'), join(home, 'bridge.js'))).toEqual([]);
   });
 
+  it('findForeignBridges does not flag our bridge when bridgeSource is unresolvable (#210)', () => {
+    // pnpm/npm relink scenario: realpath(bridgeSource) fails (install mid-upgrade),
+    // but the plugins-dir symlink still resolves to a real opencodeBridge.js.
+    // The bundled bridge's filename must identify our own symlink targets even
+    // when the realpath-equality fast path cannot.
+    const plugins = join(home, 'plugins-dangling');
+    mkdirSync(plugins, { recursive: true });
+    const realBridge = join(home, 'somewhere', 'opencodeBridge.js');
+    mkdirSync(join(home, 'somewhere'), { recursive: true });
+    writeFileSync(realBridge, '// fake bridge\n');
+    symlinkSync(realBridge, join(plugins, 'bridge-link.js'));
+    // Dangling symlink: realpathSync throws, must be treated as not-a-bridge.
+    symlinkSync(join(home, 'nowhere', 'gone.js'), join(plugins, 'dangling.js'));
+    // A genuinely foreign cavemem-referencing file must still be flagged.
+    writeFileSync(
+      join(plugins, 'stale-bridge.js'),
+      '// hand-written: shells out to cavemem hook\n',
+    );
+
+    const hits = findForeignBridges(plugins, join(home, 'missing', 'opencodeBridge.js'));
+
+    expect(hits).toEqual([join(plugins, 'stale-bridge.js')]);
+  });
+
   it('migrates a stale mcpServers.cavemem entry out of the modern config file on install', async () => {
     // A prior installer version wrote mcpServers.cavemem straight into
     // ~/.config/opencode/opencode.json (the wrong key — OpenCode expects

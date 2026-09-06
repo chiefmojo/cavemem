@@ -9,7 +9,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { readJson, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
@@ -70,17 +70,17 @@ export function findForeignBridges(pluginsDir: string, bridgeSource: string): st
     if (name === 'cavemem.js' || !/\.(js|mjs|cjs)$/.test(name)) continue;
     const full = join(pluginsDir, name);
     try {
-      if (
-        realSource !== null &&
-        lstatSync(full).isSymbolicLink() &&
-        realpathSync(full) === realSource
-      ) {
+      if (lstatSync(full).isSymbolicLink()) {
+        const resolved = realpathSync(full);
         // Our own bridge re-linked under a different name — same code, harmless.
-        continue;
+        if (resolved === realSource) continue;
+        // realSource can stay null (bridgeSource unreadable mid-upgrade); the
+        // bundled bridge's real filename still identifies our symlink targets.
+        if (basename(resolved) === 'opencodeBridge.js') continue;
       }
       if (readFileSync(full, 'utf8').toLowerCase().includes('cavemem')) hits.push(full);
     } catch {
-      // Unreadable or binary — treat as not-a-bridge rather than failing install.
+      // Unreadable, binary, or a dangling symlink — treat as not-a-bridge.
     }
   }
   return hits;

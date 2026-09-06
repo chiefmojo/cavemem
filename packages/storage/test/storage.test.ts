@@ -392,11 +392,28 @@ describe('Storage', () => {
       compressed: true,
       intensity: 'full',
     });
+    // Schema declares ide NOT NULL, but an empty string still slips through —
+    // it must fold into the 'unknown' bucket, not render as " 0/N".
+    storage.createSession({
+      id: 'cov-e1',
+      ide: '',
+      cwd: null,
+      started_at: Date.now(),
+      metadata: null,
+    });
+    storage.insertSummary({
+      session_id: 'cov-e1',
+      scope: 'turn',
+      content: 'orphan turn',
+      compressed: true,
+      intensity: 'full',
+    });
 
     const coverage = storage.summaryCoverage();
     expect(coverage).toEqual([
       { ide: 'ide-a', sessions: 2, summaries: 1 },
       { ide: 'ide-b', sessions: 1, summaries: 0 },
+      { ide: 'unknown', sessions: 1, summaries: 1 },
     ]);
   });
 });
