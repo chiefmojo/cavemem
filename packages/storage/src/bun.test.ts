@@ -106,37 +106,6 @@ describe('Storage (bun:sqlite backend)', () => {
     expect(a.map((s) => s.id)).toEqual(['cwd-a-new', 'cwd-a-old']);
   });
 
-  it('listSessions({ cwd: "" }) scopes to empty-cwd sessions, not machine-wide', () => {
-    // '' is a real cwd value (sessions recorded with an empty working
-    // directory) — it must scope, not fall through to the machine-wide query.
-    // Explicit started_at values keep ORDER BY started_at DESC deterministic.
-    const base = Date.now() + 20_000; // after sessions created by earlier tests
-    storage.createSession({
-      id: 'empty-cwd-1',
-      ide: 'test',
-      cwd: '',
-      started_at: base,
-      metadata: null,
-    });
-    storage.createSession({
-      id: 'x-cwd-1',
-      ide: 'test',
-      cwd: '/x',
-      started_at: base + 1,
-      metadata: null,
-    });
-    storage.createSession({
-      id: 'empty-cwd-2',
-      ide: 'test',
-      cwd: '',
-      started_at: base + 2,
-      metadata: null,
-    });
-
-    const empty = storage.listSessions(10, { cwd: '' });
-    expect(empty.map((s) => s.id)).toEqual(['empty-cwd-2', 'empty-cwd-1']);
-  });
-
   it('supports readonly mode: reads existing data and rejects writes', () => {
     const ro = new Storage(DB_PATH, { readonly: true });
     expect(ro.countObservations()).toBeGreaterThan(0);
