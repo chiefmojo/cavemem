@@ -19,6 +19,11 @@ cd apps/cli && pnpm link --global
 cavemem --help
 ```
 
+This symlinks `cavemem` to the working tree — it changes under you on every
+`git checkout` and `pnpm build`. For the install you actually depend on day to
+day (real `~/.cavemem` store), build and install a tarball instead — see
+[`local-install.md`](./local-install.md).
+
 ## Run against a scratch data dir
 
 `CAVEMEM_HOME` overrides where cavemem stores settings.json, data.db, and all

@@ -8,6 +8,7 @@ owns the SQLite store for every coding agent on every dev box.
 - Tracks **WP #194** (`Memory` sub-project). Currently *Developed* — the code
   is on `main`; this runbook is the "ship it" step.
 - Remote-mode behaviour and settings reference: `docs/remote.md`.
+- Building and updating a standalone (pre-cutover) local install: `docs/local-install.md`.
 
 ## Target state
 
