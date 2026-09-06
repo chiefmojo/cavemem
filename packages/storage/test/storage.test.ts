@@ -354,4 +354,66 @@ describe('Storage', () => {
     expect(storage.countEmbeddings({ model: 'm', dim: 1 })).toBe(1);
     expect(storage.countEmbeddings({ model: 'm', dim: 2 })).toBe(0);
   });
+
+  it('summaryCoverage counts turn summaries per IDE, ignoring session scope', () => {
+    storage.createSession({
+      id: 'cov-a1',
+      ide: 'ide-a',
+      cwd: null,
+      started_at: Date.now(),
+      metadata: null,
+    });
+    storage.createSession({
+      id: 'cov-a2',
+      ide: 'ide-a',
+      cwd: null,
+      started_at: Date.now(),
+      metadata: null,
+    });
+    storage.createSession({
+      id: 'cov-b1',
+      ide: 'ide-b',
+      cwd: null,
+      started_at: Date.now(),
+      metadata: null,
+    });
+    storage.insertSummary({
+      session_id: 'cov-a1',
+      scope: 'turn',
+      content: 'did the thing',
+      compressed: true,
+      intensity: 'full',
+    });
+    // Session-scope rollups are a different signal — must not inflate coverage.
+    storage.insertSummary({
+      session_id: 'cov-b1',
+      scope: 'session',
+      content: 'session wrap-up',
+      compressed: true,
+      intensity: 'full',
+    });
+    // Schema declares ide NOT NULL, but an empty string still slips through —
+    // it must fold into the 'unknown' bucket, not render as " 0/N".
+    storage.createSession({
+      id: 'cov-e1',
+      ide: '',
+      cwd: null,
+      started_at: Date.now(),
+      metadata: null,
+    });
+    storage.insertSummary({
+      session_id: 'cov-e1',
+      scope: 'turn',
+      content: 'orphan turn',
+      compressed: true,
+      intensity: 'full',
+    });
+
+    const coverage = storage.summaryCoverage();
+    expect(coverage).toEqual([
+      { ide: 'ide-a', sessions: 2, summaries: 1 },
+      { ide: 'ide-b', sessions: 1, summaries: 0 },
+      { ide: 'unknown', sessions: 1, summaries: 1 },
+    ]);
+  });
 });

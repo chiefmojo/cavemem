@@ -7,6 +7,7 @@ import { Storage } from '@cavemem/storage';
 import type { Command } from 'commander';
 import kleur from 'kleur';
 import { checkedRemoteTarget, probeRemote } from '../util/remote.js';
+import { formatSummaryCoverage } from '../util/summary-coverage.js';
 
 interface WorkerState {
   provider?: string;
@@ -103,14 +104,20 @@ export function registerStatusCommand(program: Command): void {
       // DB
       let obsCount = 0;
       let sessCount = 0;
+      let coverage: Array<{ ide: string; sessions: number; summaries: number }> = [];
       try {
         const s = new Storage(dbPath);
         obsCount = s.countObservations();
         sessCount = s.listSessions(10_000).length;
+        coverage = s.summaryCoverage();
         s.close();
         process.stdout.write(
           `db:         ${dbPath} ${kleur.green('✓')} (${obsCount} observations, ${sessCount} sessions)\n`,
         );
+        if (coverage.length > 0) {
+          // IDEs with sessions but zero turn summaries are losing turn_summary.
+          process.stdout.write(`summaries:  ${formatSummaryCoverage(coverage)}\n`);
+        }
       } catch (err) {
         process.stdout.write(`db:         ${dbPath} ${kleur.red('fail')} ${String(err)}\n`);
         process.exitCode = 1;

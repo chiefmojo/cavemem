@@ -7,6 +7,7 @@ import { Storage } from '@cavemem/storage';
 import type { Command } from 'commander';
 import kleur from 'kleur';
 import { checkedRemoteTarget, probeRemote } from '../util/remote.js';
+import { formatSummaryCoverage } from '../util/summary-coverage.js';
 
 export function registerDoctorCommand(program: Command): void {
   program
@@ -51,8 +52,13 @@ export function registerDoctorCommand(program: Command): void {
       try {
         const s = new Storage(dbPath);
         const sessions = s.listSessions(1).length;
+        const coverage = s.summaryCoverage();
         s.close();
         process.stdout.write(`db:       ${dbPath} ${kleur.green('ok')} (${sessions} sessions)\n`);
+        if (coverage.length > 0) {
+          // IDEs with sessions but zero turn summaries are losing turn_summary.
+          process.stdout.write(`summaries: ${formatSummaryCoverage(coverage)}\n`);
+        }
       } catch (err) {
         process.stdout.write(`db:       ${dbPath} ${kleur.red('fail')} ${String(err)}\n`);
         process.exitCode = 1;
