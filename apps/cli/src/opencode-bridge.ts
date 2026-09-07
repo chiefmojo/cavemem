@@ -75,6 +75,17 @@ function resolveCavememCli(): string {
 // Helpers
 /* ------------------------------------------------------------------ */
 
+// spawn() cannot execute a .js file directly on win32 — uv_spawn has no exec
+// handler for it and fails with EFTYPE (same reason commands/worker.ts spawns
+// `node <cli>`). Route .js entrypoints through the running JS runtime; bin
+// shims stay untouched.
+export function hookSpawnCommand(cliPath: string): { command: string; args: string[] } {
+  if (cliPath.endsWith('.js')) {
+    return { command: process.execPath, args: [cliPath] };
+  }
+  return { command: cliPath, args: [] };
+}
+
 function truncate(value: unknown, max = 2000): string {
   if (value == null) return '';
   const str = typeof value === 'string' ? value : JSON.stringify(value);
@@ -128,7 +139,8 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
     // await the child's exit here — that would block every hook-triggering
     // event on a full `cavemem hook run` round-trip.
     try {
-      const child = spawn(CAVEMEM, ['hook', 'run', name, '--ide', 'opencode'], {
+      const { command, args } = hookSpawnCommand(CAVEMEM);
+      const child = spawn(command, [...args, 'hook', 'run', name, '--ide', 'opencode'], {
         stdio: ['pipe', 'ignore', 'ignore'],
         detached: true,
       });
