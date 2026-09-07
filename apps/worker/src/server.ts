@@ -6,7 +6,7 @@ import { expand } from '@cavemem/compress';
 import { type Settings, loadSettings, resolveDataDir } from '@cavemem/config';
 import { type Embedder, MemoryStore } from '@cavemem/core';
 import { createEmbedder } from '@cavemem/embedding';
-import { type HookInput, type HookName, runHook } from '@cavemem/hooks';
+import { type HookInput, type HookName, buildPriorContext, runHook } from '@cavemem/hooks';
 import { buildServer } from '@cavemem/mcp-server';
 import { serve } from '@hono/node-server';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
@@ -112,6 +112,29 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
     const q = c.req.query('q') ?? '';
     const limit = Number(c.req.query('limit') ?? 10);
     return c.json(await store.search(q, limit));
+  });
+
+  // Prior-session priming for remote clients (WP #222): the opencode bridge
+  // fetches its system-prompt hints here instead of reading the empty
+  // client-local store. Ended sessions only — the bridge's guarantee; scan
+  // caps and exclusion semantics live in buildPriorContext. 500s use the
+  // same { error } envelope as the /api/hooks 4xx responses; there is no
+  // shared error middleware to inherit.
+  app.get('/api/context', (c) => {
+    const cwd = c.req.query('cwd');
+    if (!cwd) return c.json({ error: 'cwd is required' }, 400);
+    const excludeSessionId = c.req.query('exclude');
+    try {
+      return c.json({
+        hints: buildPriorContext(store, {
+          cwd,
+          ...(excludeSessionId ? { excludeSessionId } : {}),
+          endedOnly: true,
+        }),
+      });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   });
 
   // Remote-mode write path. The client ships the raw IDE payload; the same
