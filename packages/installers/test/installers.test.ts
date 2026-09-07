@@ -327,9 +327,10 @@ describe('claude-code installer', () => {
     // into garbage and the hook into MODULE_NOT_FOUND.
     const winCtx: InstallContext = {
       ideConfigDir: home,
-      cliPath: 'C:\\Users\\User\\AppData\\Roaming\\npm\\node_modules\\cavemem\\dist\\index.js',
-      nodeBin: 'C:\\nodejs\\node.exe',
+      cliPath: 'C:\\Users\\Some User\\AppData\\Roaming\\npm\\node_modules\\cavemem\\dist\\index.js',
+      nodeBin: 'C:\\Program Files\\nodejs\\node.exe',
       dataDir: join(home, '.cavemem'),
+      platform: 'win32',
     };
     await claudeCode.install(winCtx);
     const settings = JSON.parse(readFileSync(settingsPath(), 'utf8')) as {
@@ -366,7 +367,12 @@ describe('codex installer', () => {
     expect(parsed.mcp_servers.cavemem.args).toEqual([ctx.cliPath, 'mcp']);
 
     const hooks = JSON.parse(readFileSync(hooksJson(), 'utf8')) as {
-      hooks: Record<string, Array<{ hooks: Array<{ command: string; statusMessage?: string }> }>>;
+      hooks: Record<
+        string,
+        Array<{
+          hooks: Array<{ command: string; commandWindows?: string; statusMessage?: string }>;
+        }>
+      >;
     };
     expect(Object.keys(hooks.hooks).sort()).toEqual(
       ['PostToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit'].sort(),
@@ -376,6 +382,9 @@ describe('codex installer', () => {
     expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.command).toBe(
       `${shellQuote(ctx.nodeBin)} ${shellQuote(ctx.cliPath)} hook run session-start --ide codex`,
     );
+    // `commandWindows` is only emitted on win32 (native Codex); the default
+    // non-Windows install omits it rather than writing a dead Unix-path copy.
+    expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.commandWindows).toBeUndefined();
     expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.statusMessage).toBe(
       'Loading cavemem context',
     );
@@ -391,6 +400,7 @@ describe('codex installer', () => {
       cliPath: 'C:\\Users\\Some User\\AppData\\Roaming\\npm\\node_modules\\cavemem\\dist\\index.js',
       nodeBin: 'C:\\Program Files\\nodejs\\node.exe',
       dataDir: join(home, '.cavemem'),
+      platform: 'win32',
     };
     await codex.install(winCtx);
     const hooks = JSON.parse(readFileSync(hooksJson(), 'utf8')) as {
@@ -451,6 +461,19 @@ describe('codex installer', () => {
     }
   });
 
+  it('removes a stale codex_hooks key when writing the canonical hooks key', async () => {
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    writeFileSync(cfg(), ['[features]', 'codex_hooks = true', ''].join('\n'));
+
+    await codex.install(ctx);
+
+    const parsed = parseToml(readFileSync(cfg(), 'utf8')) as {
+      features: Record<string, unknown>;
+    };
+    expect(parsed.features.hooks).toBe(true);
+    expect(parsed.features.codex_hooks).toBeUndefined();
+  });
+
   it('uninstall removes only cavemem entries', async () => {
     mkdirSync(join(home, '.codex'), { recursive: true });
     writeFileSync(
@@ -479,6 +502,18 @@ describe('codex installer', () => {
     expect(hooks.hooks.SessionStart?.length).toBe(1);
     expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.command).toBe('echo other');
     expect(hooks.hooks.PostToolUse).toBeUndefined();
+  });
+
+  it('uninstall removes a legacy codex_hooks key', async () => {
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    writeFileSync(cfg(), ['[features]', 'codex_hooks = true', ''].join('\n'));
+
+    await codex.uninstall(ctx);
+
+    const parsed = parseToml(readFileSync(cfg(), 'utf8')) as {
+      features?: Record<string, unknown>;
+    };
+    expect(parsed.features?.codex_hooks).toBeUndefined();
   });
 });
 

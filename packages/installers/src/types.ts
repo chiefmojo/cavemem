@@ -12,6 +12,12 @@ export interface InstallContext {
   /** Absolute path to the local data dir (e.g., ~/.cavemem). */
   dataDir: string;
   /**
+   * Platform the installer is running on. Call sites default to
+   * `process.platform`; injectable so non-Windows CI can exercise win32-only
+   * behavior (Codex `commandWindows` emission).
+   */
+  platform?: NodeJS.Platform;
+  /**
    * Present when the machine is in remote mode (settings.remote.url set).
    * Installers then write a URL-based MCP entry pointing at `<url>/mcp`
    * instead of spawning `cavemem mcp` over stdio. Hook commands are the same

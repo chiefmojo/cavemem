@@ -99,6 +99,10 @@ export const codex: Installer = {
 
     const features = (cfg.features as Record<string, unknown> | undefined) ?? {};
     features.hooks = true;
+    // Remove the deprecated alias so a re-install over a 0.4.0-era config
+    // doesn't leave `codex_hooks` behind — Codex keeps warning while the key
+    // is present, even alongside the canonical `hooks` key.
+    delete features.codex_hooks;
     cfg.features = features;
 
     const mcpServers =
@@ -126,25 +130,22 @@ export const codex: Installer = {
     const cliPath = shellQuote(ctx.cliPath);
     const hooks = readJson<CodexHooksFile>(hooksPath, {});
     const hookMap: Record<string, CodexHookGroup[]> = { ...(hooks.hooks ?? {}) };
+    const platform = ctx.platform ?? process.platform;
 
     for (const [eventName, hookId, statusMessage] of HOOK_NAMES) {
       const existing = hookMap[eventName] ?? [];
       const others = existing.filter((g) => !isCavememHookGroup(g, hookId));
       // Codex uses `command` with Unix semantics and `commandWindows` on
       // native Windows; the base command string would otherwise be run with
-      // assumptions that break a Windows `node.exe` + `.js` path. The string
-      // is shellQuote'd to be safe under both cmd.exe and sh, so it serves
-      // both fields.
+      // assumptions that break a Windows `node.exe` + `.js` path. Only emit
+      // `commandWindows` on win32 — elsewhere it would carry a dead Unix path
+      // (ignored by Codex anyway). The string is shellQuote'd to be safe under
+      // both cmd.exe and sh, so it serves both fields.
       const command = `${nodeBin} ${cliPath} hook run ${hookId} --ide codex`;
+      const commandHook: CodexHookCommand = { type: 'command', command };
+      if (platform === 'win32') commandHook.commandWindows = command;
       const group: CodexHookGroup = {
-        hooks: [
-          {
-            type: 'command',
-            command,
-            commandWindows: command,
-            ...(statusMessage ? { statusMessage } : {}),
-          },
-        ],
+        hooks: [{ ...commandHook, ...(statusMessage ? { statusMessage } : {}) }],
       };
       others.push(group);
       hookMap[eventName] = others;
@@ -168,9 +169,12 @@ export const codex: Installer = {
         delete mcpServers.cavemem;
         if (Object.keys(mcpServers).length === 0) delete cfg.mcp_servers;
       }
-      // Leave [features] hooks alone — turning it off would break any other
-      // tools that rely on it. The hooks.json cleanup below is enough to stop
-      // cavemem hooks from firing.
+      // Remove our own deprecated `codex_hooks` alias if an earlier install
+      // wrote it; leave the canonical `[features].hooks` flag alone — turning
+      // it off would break other tools that rely on it. The hooks.json cleanup
+      // below is enough to stop cavemem hooks from firing.
+      const features = cfg.features as Record<string, unknown> | undefined;
+      if (features && 'codex_hooks' in features) delete features.codex_hooks;
       writeToml(cfgPath, cfg);
       messages.push(`updated ${cfgPath}`);
     }
