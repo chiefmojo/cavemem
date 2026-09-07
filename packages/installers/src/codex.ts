@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
-import { readJson, writeJson } from './fs-utils.js';
+import { readJson, shellQuote, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
 export const CODEX_TOKEN_ENV = 'CAVEMEM_REMOTE_TOKEN';
@@ -104,6 +104,11 @@ export const codex: Installer = {
     }
 
     // ---- hooks.json: register cavemem entries; preserve user hooks ----
+    // Codex executes each hook `command` through a shell (cmd /C on Windows,
+    // sh -lc on Unix), so nodeBin + cliPath must be shell-quoted — Windows
+    // npm paths can contain spaces and backslashes.
+    const nodeBin = shellQuote(ctx.nodeBin);
+    const cliPath = shellQuote(ctx.cliPath);
     const hooks = readJson<CodexHooksFile>(hooksPath, {});
     const hookMap: Record<string, CodexHookGroup[]> = { ...(hooks.hooks ?? {}) };
 
@@ -114,7 +119,7 @@ export const codex: Installer = {
         hooks: [
           {
             type: 'command',
-            command: `${ctx.nodeBin} ${ctx.cliPath} hook run ${hookId} --ide codex`,
+            command: `${nodeBin} ${cliPath} hook run ${hookId} --ide codex`,
             ...(statusMessage ? { statusMessage } : {}),
           },
         ],
