@@ -209,6 +209,25 @@ function log(msg: string): void {
   }
 }
 
+// Errnos that prove the resolved node binary itself cannot run (vs transient
+// resource failures, or a missing CLI on the non-.js path).
+const NODE_FATAL_CODES = new Set(['ENOENT', 'ENOEXEC', 'EFTYPE']);
+
+export type SpawnFailure = 'node-unavailable' | 'cli-not-found' | 'transient';
+
+// Maps a spawn errno to the action the bridge should take. `usesNodeRuntime`
+// is true only when a `.js` CLI is routed through the resolved node binary; the
+// bin-shim / bare-`cavemem` path never uses node, so ENOENT there means the CLI
+// itself is missing — a different failure with a different remedy.
+export function classifySpawnFailure(
+  code: string | undefined,
+  usesNodeRuntime: boolean,
+): SpawnFailure {
+  if (usesNodeRuntime && code && NODE_FATAL_CODES.has(code)) return 'node-unavailable';
+  if (!usesNodeRuntime && code === 'ENOENT') return 'cli-not-found';
+  return 'transient';
+}
+
 /* ------------------------------------------------------------------ */
 // Plugin
 /* ------------------------------------------------------------------ */
@@ -218,6 +237,8 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
 
   const NODE_UNAVAILABLE_MSG =
     "Cavemem memory capture is disabled: no usable Node.js runtime was found, so new sessions will not be saved. Install Node.js 20+ and make sure it is on OpenCode's PATH (or rerun `cavemem install --ide opencode`), then restart OpenCode.";
+  const CLI_NOT_FOUND_MSG =
+    "Cavemem memory capture is disabled: the cavemem CLI could not be found, so new sessions will not be saved. Reinstall with `cavemem install --ide opencode` (or verify cavemem is on OpenCode's PATH), then restart OpenCode.";
 
   // Resolve node on every platform: a `.js` CLI needs a runtime everywhere, and
   // on POSIX the `#!/usr/bin/env node` shebang searches the same inherited PATH
@@ -232,33 +253,38 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
     nodeBin,
   );
   let captureDisabled = launchCommand === null;
+  // The active user-facing disable message (node missing vs CLI missing), so the
+  // system-prompt surfacing and console output agree with the actual cause.
+  let disabledMessage: string | null = null;
 
-  // Errnos that prove the resolved node binary itself cannot run (vs transient
-  // resource failures, or a missing CLI on the non-.js path).
-  const NODE_FATAL_CODES = new Set(['ENOENT', 'ENOEXEC', 'EFTYPE']);
-
-  function disableCapture(reason: string): void {
+  function disableCapture(reason: string, userMessage: string): void {
     if (captureDisabled) return;
     captureDisabled = true;
     launchCommand = null;
+    disabledMessage = userMessage;
     log(`capture disabled: ${reason}`);
-    console.error(`[cavemem] ${NODE_UNAVAILABLE_MSG}`);
+    console.error(`[cavemem] ${userMessage}`);
   }
 
   function handleSpawnError(hookName: string, err: NodeJS.ErrnoException): void {
     const code = err?.code;
     const msg = err?.message || String(err);
-    if (usesNodeRuntime && code && NODE_FATAL_CODES.has(code)) {
+    const kind = classifySpawnFailure(code, usesNodeRuntime);
+    if (kind === 'node-unavailable') {
       // The resolved node binary itself is unusable — disable capture loudly.
-      disableCapture(`hook ${hookName} node launch failed: ${code} ${msg}`);
+      disableCapture(`hook ${hookName} node launch failed: ${code} ${msg}`, NODE_UNAVAILABLE_MSG);
+    } else if (kind === 'cli-not-found') {
+      // A missing CLI on the non-.js path: capture is equally dead, but the
+      // remedy is a reinstall, not a Node runtime.
+      disableCapture(`hook ${hookName} CLI not found: ${code} ${msg}`, CLI_NOT_FOUND_MSG);
     } else {
-      // Transient (EAGAIN/EMFILE) or a non-runtime problem (e.g. missing CLI on
-      // the bin-shim path) — log and let the next hook retry.
+      // Transient (EAGAIN/EMFILE) — log and let the next hook retry.
       log(`hook ${hookName} spawn failed: ${code ?? 'ERR'} ${msg}`);
     }
   }
 
   if (captureDisabled) {
+    disabledMessage = NODE_UNAVAILABLE_MSG;
     log('capture disabled at init: no usable Node.js runtime');
     console.error(`[cavemem] ${NODE_UNAVAILABLE_MSG}`);
   }
@@ -518,8 +544,8 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
 
     'experimental.chat.system.transform': async (input, output) => {
       try {
-        if (captureDisabled && !output.system.includes(NODE_UNAVAILABLE_MSG)) {
-          output.system.push(NODE_UNAVAILABLE_MSG);
+        if (captureDisabled && disabledMessage && !output.system.includes(disabledMessage)) {
+          output.system.push(disabledMessage);
         }
         const sid = input?.sessionID;
         if (!sid) return;

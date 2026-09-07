@@ -3,7 +3,11 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { hookSpawnCommand, resolveNodeBinary } from '../src/opencode-bridge.js';
+import {
+  classifySpawnFailure,
+  hookSpawnCommand,
+  resolveNodeBinary,
+} from '../src/opencode-bridge.js';
 
 // Windows: spawn() cannot execute a .js file directly — uv_spawn has no exec
 // handler for it and fails with EFTYPE (same failure worker.ts already guards
@@ -244,6 +248,29 @@ describe('resolveNodeBinary', () => {
       platform: 'linux',
     });
     expect(result).toBe(fakeNode);
+  });
+});
+
+describe('classifySpawnFailure', () => {
+  it('treats a fatal errno on the node-runtime path as node-unavailable', () => {
+    for (const code of ['ENOENT', 'ENOEXEC', 'EFTYPE']) {
+      expect(classifySpawnFailure(code, true)).toBe('node-unavailable');
+    }
+  });
+
+  it('treats ENOENT on the non-.js (bin-shim) path as cli-not-found', () => {
+    expect(classifySpawnFailure('ENOENT', false)).toBe('cli-not-found');
+  });
+
+  it('treats transient errnos as non-fatal (log only)', () => {
+    expect(classifySpawnFailure('EAGAIN', true)).toBe('transient');
+    expect(classifySpawnFailure('EMFILE', true)).toBe('transient');
+    expect(classifySpawnFailure('EAGAIN', false)).toBe('transient');
+  });
+
+  it('treats a non-ENOENT errno on the bin-shim path as transient', () => {
+    expect(classifySpawnFailure('EACCES', false)).toBe('transient');
+    expect(classifySpawnFailure(undefined, false)).toBe('transient');
   });
 });
 
