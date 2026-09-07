@@ -23,6 +23,7 @@ The central server should set `workerHost` to `"0.0.0.0"`, provide a non-empty `
 - After setting `remote.url`, run or rerun `cavemem install` for each client IDE. It writes remote MCP entries for Claude Code (`type: "http"`), Codex (`url` plus `bearer_token_env_var: "CAVEMEM_REMOTE_TOKEN"`), and OpenCode (`type: "remote"`) instead of stdio commands. `install` only touches each IDE's canonical config location; a stale stdio entry an earlier install left elsewhere (e.g. `~/.opencode/opencode.json`, found by OpenCode's upward directory walk) will shadow the remote entry until removed.
 - Codex reads `CAVEMEM_REMOTE_TOKEN` from its process environment — inline `bearer_token` is unsupported for streamable-http. The variable must be exported where **non-interactive** shells see it (above the `case $- in *i*` guard in `~/.bashrc`, or in `~/.config/environment.d/`), since Codex is often spawned outside a login prompt.
 - `cavemem search` calls `GET <remote.url>/api/search` with the bearer token instead of querying a local store.
+- `GET /api/context?cwd=<dir>&exclude=<sessionId>` — prior-session summary hints for OpenCode priming (bearer; 400 without cwd; ended sessions only; scan cap 10; max 3 hints)
 - Local-only commands refuse with ``remote mode: run `cavemem <command>` on the server (<url>)``: `worker *`, `start`, `stop`, `restart`, `viewer`, `reindex`, `export`, `import`, and `mcp`.
 
 ## Failure behaviour
