@@ -371,13 +371,42 @@ describe('codex installer', () => {
     expect(Object.keys(hooks.hooks).sort()).toEqual(
       ['PostToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit'].sort(),
     );
+    // Hook commands are shell-quoted (Codex runs them through a shell); on
+    // win32 the temp cliPath has backslashes, which shellQuote wraps in quotes.
     expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.command).toBe(
-      `${ctx.nodeBin} ${ctx.cliPath} hook run session-start --ide codex`,
+      `${shellQuote(ctx.nodeBin)} ${shellQuote(ctx.cliPath)} hook run session-start --ide codex`,
     );
     expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.statusMessage).toBe(
       'Loading cavemem context',
     );
     expect(hooks.hooks.PostToolUse?.[0]?.hooks?.[0]?.statusMessage).toBeUndefined();
+  });
+
+  it('quotes Windows paths in hook command strings', async () => {
+    // Codex runs hook `command` through a shell (cmd /C on Windows), so paths
+    // with spaces and backslashes must be double-quoted — mirroring the
+    // claude-code / copilot installers.
+    const winCtx: InstallContext = {
+      ideConfigDir: home,
+      cliPath: 'C:\\Users\\Some User\\AppData\\Roaming\\npm\\node_modules\\cavemem\\dist\\index.js',
+      nodeBin: 'C:\\Program Files\\nodejs\\node.exe',
+      dataDir: join(home, '.cavemem'),
+    };
+    await codex.install(winCtx);
+    const hooks = JSON.parse(readFileSync(hooksJson(), 'utf8')) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+    expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.command).toBe(
+      `"${winCtx.nodeBin}" "${winCtx.cliPath}" hook run session-start --ide codex`,
+    );
+    // MCP entry stays a structured {command, args} shape — no shell quoting.
+    const parsed = parseToml(readFileSync(cfg(), 'utf8')) as {
+      mcp_servers: { cavemem: { command: string; args: string[] } };
+    };
+    expect(parsed.mcp_servers.cavemem).toEqual({
+      command: winCtx.nodeBin,
+      args: [winCtx.cliPath, 'mcp'],
+    });
   });
 
   it('preserves user TOML keys and is idempotent', async () => {
