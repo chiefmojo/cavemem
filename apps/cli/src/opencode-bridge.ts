@@ -77,11 +77,16 @@ function resolveCavememCli(): string {
 
 // spawn() cannot execute a .js file directly on win32 — uv_spawn has no exec
 // handler for it and fails with EFTYPE (same reason commands/worker.ts spawns
-// `node <cli>`). Route .js entrypoints through the running JS runtime; bin
-// shims stay untouched.
+// `node <cli>`). Route .js entrypoints through a real node runtime. Beware
+// process.execPath: inside an IDE-embedded runtime (e.g. opencode's compiled
+// Bun binary) it is the IDE executable, not node — spawning it would launch
+// the IDE recursively. Use it only when it is node; otherwise resolve `node`
+// from PATH (guaranteed present wherever this CLI was npm-installed).
 export function hookSpawnCommand(cliPath: string): { command: string; args: string[] } {
   if (cliPath.endsWith('.js')) {
-    return { command: process.execPath, args: [cliPath] };
+    const exec = process.execPath || '';
+    const isNode = /(^|[/\\])node(\.exe)?$/.test(exec);
+    return { command: isNode ? exec : 'node', args: [cliPath] };
   }
   return { command: cliPath, args: [] };
 }

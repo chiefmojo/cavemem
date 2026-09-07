@@ -6,14 +6,15 @@ import { describe, expect, it } from 'vitest';
 import { hookSpawnCommand } from '../src/opencode-bridge.js';
 
 // Windows: spawn() cannot execute a .js file directly — uv_spawn has no exec
-// handler for it and fails with EFTYPE (same failure modes/worker.ts already
-// guards against). The bridge must route .js entrypoints through the running
-// JS runtime instead of spawning them raw.
+// handler for it and fails with EFTYPE (same failure worker.ts already guards
+// against). The bridge must route .js entrypoints through a real node runtime
+// — and never through process.execPath when that is the IDE's own binary
+// (opencode embeds Bun, so execPath is opencode.exe inside a plugin).
 describe('hookSpawnCommand', () => {
-  it('wraps .js entrypoints in the current runtime', () => {
+  it('wraps .js entrypoints in a node runtime', () => {
     const cli = join('C:', 'npm', 'node_modules', 'cavemem', 'dist', 'index.js');
     const { command, args } = hookSpawnCommand(cli);
-    expect(command).toBe(process.execPath);
+    expect(command === process.execPath || command === 'node').toBe(true);
     expect(args).toEqual([cli]);
   });
 
