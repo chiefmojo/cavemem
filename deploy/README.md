@@ -272,15 +272,16 @@ Local-only commands (`worker *`, `start`, `stop`, `restart`, `viewer`,
 Per-client, no server teardown needed:
 
 ```bash
-cavemem config open     # delete the whole "remote": { … } block, save
+cavemem config unset remote.url && cavemem config unset remote.token
 cavemem install --ide claude-code --ide codex --ide opencode   # rewrites stdio entries
 cavemem start
 ```
 
-Hand-editing is the sanctioned path: `config` has no `unset` subcommand, and
-`config set remote.url ""` fails schema validation (the value must be a real
-`http(s)://` URL). Same remediation `cavemem doctor` suggests for a stale local
-pidfile. A `config unset <key>` subcommand is tracked as WP #219.
+Rollback uses `config unset` (implemented in WP #219): it drops the optional
+keys from settings.json entirely, reverting the machine to local mode.
+Hand-editing is no longer needed — `config set remote.url ""` still fails
+schema validation (the value must be a real `http(s)://` URL), which is why
+`unset` exists.
 
 The local `data.db` fallback resumes from where it was at cutover (it will be
 stale by the gap, but functional). Anything written to the central store during
