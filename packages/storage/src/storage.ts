@@ -293,8 +293,13 @@ export class Storage {
   }
 
   listSummaries(sessionId: string): SummaryRow[] {
+    // `id DESC` breaks same-ms ts ties newest-inserted-first (id is
+    // AUTOINCREMENT). Without it, same-ts rows have no defined order — the
+    // bridge's detached stop/session-end spawns can insert a late turn
+    // summary in the same millisecond as the session rollup, and hint
+    // selection would flip between them (WP #222 PR review).
     return this.db
-      .prepare('SELECT * FROM summaries WHERE session_id = ? ORDER BY ts DESC')
+      .prepare('SELECT * FROM summaries WHERE session_id = ? ORDER BY ts DESC, id DESC')
       .all(sessionId) as SummaryRow[];
   }
 

@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { expand } from '@cavemem/compress';
 import { loadSettings, resolveDataDir } from '@cavemem/config';
 import { MemoryStore } from '@cavemem/core';
+import type { RemoteTarget } from '@cavemem/hooks';
+import { checkedRemoteTarget } from './util/remote.js';
 
 /* ------------------------------------------------------------------ */
 // Minimal local types for the OpenCode plugin API (no runtime dependency
@@ -197,6 +199,14 @@ function truncate(value: unknown, max = 2000): string {
   return str.length > max ? `${str.slice(0, max)}…` : str;
 }
 
+// Error name only, never the message: remote-mode exception messages can
+// embed the authorization header value (e.g. undici's invalid-header
+// TypeError quotes the full `Bearer …` string) or raw settings content
+// (JSON.parse failures), and the remote token must never reach the log.
+function errorName(err: unknown): string {
+  return (err as { name?: string })?.name || 'Error';
+}
+
 const LOG_PATH = join(tmpdir(), 'cavemem-bridge-errors.log');
 
 function log(msg: string): void {
@@ -298,17 +308,26 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
   // Track which message IDs are user messages (for prompt capture).
   const userMessageIds = new Set<string>();
 
-  // Load settings and open the store once for read-only context retrieval.
-  // The store is used only for prior-session priming; all writes go through
-  // the cavemem CLI hook commands so they follow the compression + redaction
-  // pipeline enforced by MemoryStore.
+  // Prior-session priming source. Remote mode: prime from the worker via
+  // /api/context — the client-local data.db is empty/stale here (WP #222),
+  // and opening it would also create a junk empty data.db on remote clients.
+  // Local mode: read the local store exactly as before. Both settings load
+  // and target resolution are guarded: checkedRemoteTarget throws on an
+  // invalid remote.url, and a throw here would take down every bridge hook —
+  // including the fire-and-forget writes — so we degrade to no priming at all.
   let store: MemoryStore | undefined;
+  let remote: RemoteTarget | undefined;
   try {
     const settings = loadSettings();
-    const dbPath = join(resolveDataDir(settings.dataDir), 'data.db');
-    store = new MemoryStore({ dbPath, settings });
-  } catch {
-    // If settings or DB are missing, prior-session context is simply skipped.
+    const target = checkedRemoteTarget(settings);
+    if (target) {
+      remote = target;
+    } else {
+      const dbPath = join(resolveDataDir(settings.dataDir), 'data.db');
+      store = new MemoryStore({ dbPath, settings });
+    }
+  } catch (err) {
+    log(`init degraded, priming disabled: ${errorName(err)}`);
   }
 
   async function runHook(name: string, data: Record<string, unknown>): Promise<void> {
@@ -356,9 +375,45 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
     if (queriedSessions.has(sessionID)) return '';
     queriedSessions.add(sessionID);
 
-    if (!store) return '';
-
     try {
+      if (remote) {
+        // /api/context rejects unscoped reads by design (privacy — a 400 is
+        // guaranteed), while the local path treats a falsy directory as "no
+        // scoping" and still primes. Skipping beats a doomed round-trip.
+        if (!directory) {
+          log(`retrieval for ${sessionID}: skipped (no directory to scope by)`);
+          return '';
+        }
+        const u = new URL('/api/context', remote.url);
+        u.searchParams.set('cwd', directory);
+        u.searchParams.set('exclude', sessionID);
+        const res = await fetch(u, {
+          headers: { authorization: `Bearer ${remote.token ?? ''}` },
+          signal: AbortSignal.timeout(remote.timeoutMs),
+        });
+        if (!res.ok) {
+          // Status is a bare number — safe to log. Never log the exception
+          // message or body here: they can embed the authorization value.
+          log(`context fetch failed: ${res.status}`);
+          return '';
+        }
+        const body = (await res.json()) as {
+          hints?: Array<{ sessionId: string; content: string; compressed: boolean }>;
+        };
+        const hints = (body.hints ?? [])
+          .map((h) => (h.compressed ? expand(h.content) : h.content).trim())
+          .filter((t) => t.length > 0);
+
+        log(`retrieval for ${sessionID}: ${hints.length} hints found`);
+        if (hints.length === 0) return '';
+
+        const context = `Prior context (internal): ${hints.join(' | ')}`;
+        log(`injected ${context.length} chars`);
+        return context;
+      }
+
+      if (!store) return '';
+
       const sessions = store.storage.listSessions(50);
       // Scope to the current project directory — otherwise opening OpenCode
       // in project A can inject summaries from an unrelated project B
@@ -390,8 +445,16 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
       log(`injected ${context.length} chars`);
       return context;
     } catch (err) {
-      const msg = (err as Error)?.message || String(err);
-      log(`retrieval error: ${msg}`);
+      if (remote) {
+        // Remote mode: name only — see errorName() for why the message is
+        // unsafe (fetch/header/parse errors can quote the authorization
+        // value; timeout failures surface as AbortError/TimeoutError names).
+        log(`retrieval error: ${errorName(err)}`);
+      } else {
+        // Local store errors cannot contain the remote token — keep detail.
+        const msg = (err as Error)?.message || String(err);
+        log(`retrieval error: ${msg}`);
+      }
       return '';
     }
   }
