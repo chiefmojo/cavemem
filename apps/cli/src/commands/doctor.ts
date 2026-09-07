@@ -3,12 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadSettings, resolveDataDir, settingsPath } from '@cavemem/config';
 import { spoolDepth, spoolPath } from '@cavemem/hooks';
-import {
-  CODEX_TOKEN_ENV,
-  checkWindowsSh,
-  codexMcpMode,
-  syncWindowsUserEnvVar,
-} from '@cavemem/installers';
+import { checkWindowsSh, codexMcpMode } from '@cavemem/installers';
 import { Storage } from '@cavemem/storage';
 import type { Command } from 'commander';
 import kleur from 'kleur';
@@ -41,29 +36,6 @@ export function registerDoctorCommand(program: Command): void {
         process.stdout.write(`auth:     ${probe.auth ? kleur.green('ok') : kleur.red('fail')}\n`);
         if (!probe.healthz || !probe.auth) process.exitCode = 1;
         if (settings.ides.codex) {
-          if (target.token) {
-            if (process.platform === 'win32') {
-              const sync = syncWindowsUserEnvVar(CODEX_TOKEN_ENV, target.token);
-              if (sync.changed) {
-                process.stdout.write(
-                  `codex:    ${kleur.green(`persisted ${CODEX_TOKEN_ENV} to your Windows user environment — restart Codex to pick it up`)}\n`,
-                );
-              } else if (sync.synced) {
-                process.stdout.write(
-                  `codex:    ${kleur.green(`${CODEX_TOKEN_ENV} present (user environment)`)}\n`,
-                );
-              } else {
-                process.stdout.write(
-                  `codex:    ${kleur.red(`could not persist ${CODEX_TOKEN_ENV} — codex MCP auth will fail`)}\n`,
-                );
-                process.exitCode = 1;
-              }
-            } else if (!process.env[CODEX_TOKEN_ENV]) {
-              process.stdout.write(
-                `codex:    ${kleur.yellow(`${CODEX_TOKEN_ENV} not set in this shell — codex MCP auth will fail`)}\n`,
-              );
-            }
-          }
           const mode = codexMcpMode(homedir());
           if (mode !== 'remote') {
             process.stdout.write(

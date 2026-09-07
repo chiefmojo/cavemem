@@ -11,11 +11,5 @@ export {
   WINDOWS_SH_MISSING_WARNING,
   type CheckWindowsShOptions,
 } from './windows-sh.js';
-export { CODEX_TOKEN_ENV, codexMcpMode, codexWslWarning } from './codex.js';
-export {
-  readUserEnvDefault,
-  syncWindowsUserEnvVar,
-  writeUserEnvDefault,
-  type WindowsUserEnvSyncResult,
-} from './windows-env.js';
+export { codexMcpMode, codexWslWarning } from './codex.js';
 export { findForeignBridges } from './opencode.js';

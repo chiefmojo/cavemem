@@ -5,22 +5,6 @@ import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { readJson, shellQuote, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
-export const CODEX_TOKEN_ENV = 'CAVEMEM_REMOTE_TOKEN';
-
-/**
- * Remote-mode post-install hint for the bearer-token env var. Codex reads
- * `bearer_token_env_var` from its own process environment at startup, so on
- * Windows this must be set in the user environment (`setx` / System
- * Properties) rather than a POSIX `export`. `platform` mirrors the injectable
- * arg on `checkWindowsSh` so non-Windows CI can exercise the win32 branch.
- */
-export function codexRemoteTokenHint(platform: NodeJS.Platform = process.platform): string {
-  if (platform === 'win32') {
-    return `codex reads the bearer token from the environment — persist it in your user environment, then restart Codex:\n    setx ${CODEX_TOKEN_ENV} "<your-cavemem-remote-token>"\n  (setx applies to newly launched shells — open a new terminal / restart Codex after running it)`;
-  }
-  return `codex reads the bearer token from the environment — add to your shell profile:\n    export ${CODEX_TOKEN_ENV}=<your-cavemem-remote-token>`;
-}
-
 /**
  * Reads the current Codex MCP wiring for cavemem from
  * `<ideConfigDir>/.codex/config.toml`, so `doctor` can flag a stdio entry that
@@ -147,17 +131,16 @@ export const codex: Installer = {
     mcpServers.cavemem = ctx.remote
       ? {
           url: `${ctx.remote.url.replace(/\/+$/, '')}/mcp`,
-          // Codex reads the bearer from its own environment, not from config.
-          bearer_token_env_var: CODEX_TOKEN_ENV,
+          // Static bearer via request headers, matching Claude Code / OpenCode.
+          // `bearer_token` is rejected at parse, and `bearer_token_env_var`
+          // needs out-of-band env setup — the WP #231 issue #4 failure mode.
+          http_headers: { Authorization: `Bearer ${ctx.remote.token}` },
         }
       : { command: ctx.nodeBin, args: [ctx.cliPath, 'mcp'] };
     cfg.mcp_servers = mcpServers;
 
     writeToml(cfgPath, cfg);
     messages.push(`wrote ${cfgPath}`);
-    if (ctx.remote) {
-      messages.push(codexRemoteTokenHint());
-    }
 
     // ---- hooks.json: register cavemem entries; preserve user hooks ----
     // Codex executes each hook `command` through a shell (cmd /C on Windows,

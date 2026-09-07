@@ -30,24 +30,20 @@ vi.mock('@cavemem/storage', () => ({
 vi.mock('@cavemem/worker', () => ({ start: boundaries.worker }));
 vi.mock('@cavemem/mcp-server', () => ({ main: boundaries.mcp }));
 vi.mock('@cavemem/installers', () => ({
-  CODEX_TOKEN_ENV: 'CAVEMEM_REMOTE_TOKEN',
   codexMcpMode: () => 'remote',
   checkWindowsSh: () => null,
   installers: {},
   getInstaller: () => {
     throw new Error('no installer wired in this test');
   },
-  syncWindowsUserEnvVar: () => ({ synced: true, changed: false, previous: null }),
 }));
 
 let dir: string;
 let originalHome: string | undefined;
-let originalCodexToken: string | undefined;
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'cavemem-cli-remote-'));
   originalHome = process.env.CAVEMEM_HOME;
-  originalCodexToken = process.env.CAVEMEM_REMOTE_TOKEN;
   process.env.CAVEMEM_HOME = dir;
   vi.resetModules();
 });
@@ -64,8 +60,6 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  if (originalCodexToken === undefined) delete process.env.CAVEMEM_REMOTE_TOKEN;
-  else process.env.CAVEMEM_REMOTE_TOKEN = originalCodexToken;
 });
 
 afterAll(() => {
@@ -103,7 +97,6 @@ describe('remote CLI commands', () => {
     writeSettings({ ides: { codex: true } });
     writeFileSync(join(dir, 'spool.jsonl'), '{}\n');
     writeFileSync(join(dir, 'worker.pid'), '12345\n');
-    delete process.env.CAVEMEM_REMOTE_TOKEN;
     vi.stubGlobal(
       'fetch',
       vi
@@ -122,11 +115,6 @@ describe('remote CLI commands', () => {
     expect(out).toContain('token:    present');
     expect(out).toContain('server:   ok');
     expect(out).toContain('auth:     ok');
-    expect(out).toContain(
-      process.platform === 'win32'
-        ? 'CAVEMEM_REMOTE_TOKEN present'
-        : 'CAVEMEM_REMOTE_TOKEN not set',
-    );
     expect(out).toContain('cavemem config unset remote.url');
     expect(out).toContain('cavemem stop');
     expect(out).toContain('restore remote.url');
