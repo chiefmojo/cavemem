@@ -568,10 +568,18 @@ import { MemoryStore } from '@cavemem/core';
 import { checkedRemoteTarget } from './util/remote.js';
 ```
 
-3b. Log path (L84):
+3b. Log path (L84), plus a module-scope logging helper — error **name** only, never the message:
 
 ```ts
 const LOG_PATH = join(tmpdir(), 'cavemem-bridge-errors.log');
+
+// Error name only, never the message: remote-mode exception messages can
+// embed the authorization header value (e.g. undici's invalid-header
+// TypeError quotes the full `Bearer …` string) or raw settings content
+// (JSON.parse failures), and the remote token must never reach the log.
+function errorName(err: unknown): string {
+  return (err as { name?: string })?.name || 'Error';
+}
 ```
 
 3c. Replace the store-init block (L112–123) with the guarded remote/local init:
@@ -596,8 +604,9 @@ const LOG_PATH = join(tmpdir(), 'cavemem-bridge-errors.log');
       store = new MemoryStore({ dbPath, settings });
     }
   } catch (err) {
-    const msg = (err as Error)?.message || String(err);
-    log(`init degraded, priming disabled: ${msg.slice(0, 200)}`);
+    // Error name only: settings/JSON.parse errors can quote file content
+    // containing the token; the message must never reach the log.
+    log(`init degraded, priming disabled: ${errorName(err)}`);
   }
 ```
 
@@ -618,7 +627,12 @@ const LOG_PATH = join(tmpdir(), 'cavemem-bridge-errors.log');
           headers: { authorization: `Bearer ${remote.token ?? ''}` },
           signal: AbortSignal.timeout(remote.timeoutMs),
         });
-        if (!res.ok) throw new Error(`context fetch failed: ${res.status}`);
+        if (!res.ok) {
+          // Status is a bare number — safe to log. Never log the exception
+          // message or body here: they can embed the authorization value.
+          log(`context fetch failed: ${res.status}`);
+          return '';
+        }
         const body = (await res.json()) as {
           hints?: Array<{ sessionId: string; content: string; compressed: boolean }>;
         };
@@ -667,8 +681,15 @@ const LOG_PATH = join(tmpdir(), 'cavemem-bridge-errors.log');
       log(`injected ${context.length} chars`);
       return context;
     } catch (err) {
-      const msg = (err as Error)?.message || String(err);
-      log(`retrieval error: ${msg}`);
+      if (remote) {
+        // Error name only — remote exception messages can embed the
+        // authorization header value (e.g. invalid-header TypeErrors).
+        log(`retrieval error: ${errorName(err)}`);
+      } else {
+        // Local store errors cannot contain the remote token — keep detail.
+        const msg = (err as Error)?.message || String(err);
+        log(`retrieval error: ${msg}`);
+      }
       return '';
     }
   }
