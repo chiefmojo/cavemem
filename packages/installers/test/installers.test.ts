@@ -464,6 +464,7 @@ describe('opencode installer', () => {
 
   const cfgPath = () => join(home, '.config', 'opencode', 'opencode.json');
   const pluginPath = () => join(home, '.config', 'opencode', 'plugins', 'cavemem.js');
+  const bridgeMetaPath = () => join(home, '.config', 'opencode', 'cavemem-bridge.json');
 
   it('writes opencode.json with mcp schema + symlinks bridge plugin', async () => {
     await openCode.install(ctx);
@@ -480,6 +481,10 @@ describe('opencode installer', () => {
       enabled: true,
     });
     expect(cfg.plugin).toContain('file://./plugins/cavemem.js');
+
+    // Sidecar records the absolute node binary for the bridge plugin.
+    expect(existsSync(bridgeMetaPath())).toBe(true);
+    expect(JSON.parse(readFileSync(bridgeMetaPath(), 'utf8'))).toEqual({ nodeBin: ctx.nodeBin });
 
     // Plugin must be a symlink to the bundled bridge file.
     const plugin = readFileSync(pluginPath(), 'utf8');
@@ -617,6 +622,7 @@ describe('opencode installer', () => {
     expect(after.mcp.cavemem).toBeUndefined();
     expect(after.plugin).toEqual(['some-other-plugin', 'my-cavemem-helper.js']);
     expect(existsSync(pluginPath())).toBe(false);
+    expect(existsSync(bridgeMetaPath())).toBe(false);
   });
 
   it('cleans up legacy config on uninstall', async () => {
@@ -731,15 +737,29 @@ describe('remote mode MCP entries', () => {
   });
 
   it('opencode writes a remote MCP entry with headers', async () => {
-    await openCode.install({ ...ctx, remote });
-    const path = join(home, '.config', 'opencode', 'opencode.json');
-    const json = JSON.parse(readFileSync(path, 'utf8'));
-    expect(json.mcp.cavemem).toEqual({
-      type: 'remote',
-      url: 'http://neuromancer:37777/mcp',
-      headers: { Authorization: 'Bearer tok123' },
-      enabled: true,
-    });
+    // Pin XDG so both the config and the sidecar land inside the temp home
+    // regardless of the host environment.
+    const originalXdg = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = join(home, '.config');
+    try {
+      await openCode.install({ ...ctx, remote });
+      const path = join(home, '.config', 'opencode', 'opencode.json');
+      const json = JSON.parse(readFileSync(path, 'utf8'));
+      expect(json.mcp.cavemem).toEqual({
+        type: 'remote',
+        url: 'http://neuromancer:37777/mcp',
+        headers: { Authorization: 'Bearer tok123' },
+        enabled: true,
+      });
+      // Remote mode has no `command` array, but the sidecar still records the
+      // node binary so the bridge can spawn the local CLI for hooks.
+      const metaPath = join(home, '.config', 'opencode', 'cavemem-bridge.json');
+      expect(existsSync(metaPath)).toBe(true);
+      expect(JSON.parse(readFileSync(metaPath, 'utf8'))).toEqual({ nodeBin: ctx.nodeBin });
+    } finally {
+      if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = originalXdg;
+    }
   });
 
   it('re-installing without remote flips back to stdio', async () => {
