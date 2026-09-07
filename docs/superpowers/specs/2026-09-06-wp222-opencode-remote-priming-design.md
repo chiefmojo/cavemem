@@ -23,7 +23,7 @@ Evidence (from WP #222, found during WP #194 Windows-client onboarding): bridge 
 
 - Changing the write path (hooks stay fire-and-forget; no stdout capture from the CLI subprocess).
 - Making `sessionStart` expand compressed summaries (hook IDEs keep receiving stored/compressed text).
-- Unifying local vs remote opencode summary selection (local keeps session-scope-only; remote adopts the shared builder's semantics).
+- Unifying local vs remote opencode summary selection (local keeps session-scope-only; remote prefers session-scope with a first-any-scope fallback — matching bridge-local selection; `sessionStart` keeps first-any-scope).
 - Any changes to `/mcp`, `/api/search`, or the viewer.
 
 ## Design
@@ -53,6 +53,7 @@ Writes stay fire-and-forget via the CLI hook commands. The once-per-session `que
   - `exclude` — optional sessionID to skip (the priming session itself).
 - Response `200`: `{ "hints": [{ "sessionId": string, "content": string, "compressed": boolean }] }` — a faithful data view; no formatting server-side. `compressed` is normalized from the storage 0/1 flag to boolean.
 - Empty result → `{ "hints": [] }`. Unexpected errors → `500 { "error": string }` — pinned to match the `/api/hooks` 4xx envelope (`{ error }`); the worker has no shared error middleware to inherit.
+- Route hardcodes `endedOnly: true` **and `preferSessionScope: true`** — the bridge's local-path guarantees (ended sessions only; session rollup preferred, any-scope fallback).
 
 ### 3. Shared builder (`packages/hooks/src/prior-context.ts`)
 
@@ -61,6 +62,7 @@ Writes stay fire-and-forget via the CLI hook commands. The once-per-session `que
 - SQL cwd-scoped fetch: `store.storage.listSessions(20, { cwd })`.
 - Skip `excludeSessionId`; scan cap `MAX_CANDIDATES_SCANNED = 10`; first summary of any scope per session (`listSummaries(s.id)[0]`); cap 3 hints.
 - `endedOnly?: boolean` — when true, candidates with `ended_at === null` are skipped. The bridge passes `true` to keep its current ended-sessions-only guarantee (without it, a concurrent same-cwd window's in-flight turn summary — `listSummaries` is `ORDER BY ts DESC` across all scopes — could be injected into the other window's priming). `sessionStart` omits the flag and keeps its exact semantics. **An `endedOnly` skip consumes a `MAX_CANDIDATES_SCANNED` slot** (same accounting as a summary-less candidate): a transparent skip would let the scan walk past unboundedly many in-flight sessions and reach arbitrarily far back, defeating the cap's guarantee. `excludeSessionId` remains transparent (pre-scan check, matching current `sessionStart` behavior).
+- `preferSessionScope?: boolean` — when true, per candidate select the `scope === 'session'` summary when one exists, else fall back to the newest summary of any scope. The bridge passes `true`: its local path always selected the session rollup (`find(s => s.scope === 'session')`), so remote priming must too — otherwise the stop/session-end spawn race (a late turn summary with a newer `ts`, or a same-ms tie — `listSummaries` now breaks ties `id DESC`) makes `[0]` a raw assistant turn and the next same-cwd session primes with it (PR #7 review). `sessionStart` omits the flag and keeps its historical first-any-scope behavior.
 - Returns raw rows `{ sessionId, content, compressed }` (boolean), no formatting.
 
 `sessionStart` (`packages/hooks/src/handlers/session-start.ts`) refactors onto the builder (omitting `endedOnly`) and re-renders its current output (`## Prior-session context\n` + hints joined `\n---\n`, raw stored content). **Existing session-start tests must pass unmodified** — that is the behavior-preservation proof.
@@ -71,7 +73,7 @@ Exported through `packages/hooks` package exports (worker already depends on `@c
 
 - Settings load and `checkedRemoteTarget(settings)` both run inside one guarded init: `checkedRemoteTarget` **throws** on an invalid `remote.url` (`canonicalRemoteUrl` rejects path/query/fragment), so a throw here is caught, logged, and degrades to *no priming at all* — plugin init never throws, and the fire-and-forget write hooks are unaffected (fail-open goal). When a target resolves, **no local `MemoryStore` is opened at all** — this also stops creating a junk empty `data.db` on remote clients.
 - `getRecentContext` branches:
-  - Remote: one fetch to `/api/context` with `cwd` = the plugin `directory` — deliberately the same value the local path scopes reads by (`s.cwd === directory`), not the write hook's `session.directory || directory`; `exclude` = current sessionID; bearer header + `AbortSignal.timeout(remote.timeoutMs)`; same pattern as `remoteSearch`. Expand hints with `compressed === true` client-side (the `expand` import stays), format `Prior context (internal): ${hints.join(' | ')}` — the identical string local mode produces today.
+  - Remote: one fetch to `/api/context` with `cwd` = the plugin `directory` — deliberately the same value the local path scopes reads by (`s.cwd === directory`), not the write hook's `session.directory || directory`; `exclude` = current sessionID; bearer header + `AbortSignal.timeout(remote.timeoutMs)`; same pattern as `remoteSearch`. An empty plugin `directory` skips priming entirely (`retrieval for <sid>: skipped (no directory to scope by)`) — `/api/context` rejects unscoped reads by design (400), so a fetch could only round-trip a guaranteed 400; the local path keeps its historical unscoped fallback. Expand hints with `compressed === true` client-side (the `expand` import stays), format `Prior context (internal): ${hints.join(' | ')}` — the identical string local mode produces today.
   - Local: existing code path, untouched.
 - Logging to `join(os.tmpdir(), 'cavemem-bridge-errors.log')` replaces the hardcoded `/tmp/...` (`LOG_PATH`, L84): on Windows the hardcoded path does not exist, `appendFileSync` throws, and `log()` swallows it — zero diagnostics on the exact platform this WP was found on. Same log lines as before (`retrieval for <sid>: N hints` / error lines).
 - Known deferral (pre-existing, both modes, out of scope): the read scopes by the plugin `directory` while the session-start write records `cwd: session.directory || directory` (L218); when they diverge (session opened in a subdir, multi-root workspace) the read won't match those rows. Conscious deferral, not an oversight.

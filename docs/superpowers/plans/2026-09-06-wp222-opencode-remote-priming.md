@@ -15,7 +15,7 @@
 - Local-mode bridge behavior and `sessionStart` output are byte-identical to today; existing `packages/hooks/test/runner.test.ts` must pass **unmodified** as the proof.
 - Fail-open: plugin init and `getRecentContext` never throw; worst case is one ≤ `remote.timeoutMs` (default 1500 ms) round-trip per fetch — the `queriedSessions` guard suppresses repeat fetches only until the existing `session.idle`/`session.deleted` reset re-enables the session, not for the session's entire lifetime. The IDE is never blocked beyond that.
 - The remote token is never logged.
-- `GET /api/context`: behind the worker's existing `bearerAuth` middleware (no extra wiring); `cwd` required → `400 { error: 'cwd is required' }`; unexpected errors → `500 { error: string }` (same envelope as `/api/hooks` 4xx — there is no shared error middleware to inherit); route hardcodes `endedOnly: true` (the bridge's ended-sessions-only guarantee).
+- `GET /api/context`: behind the worker's existing `bearerAuth` middleware (no extra wiring); `cwd` required → `400 { error: 'cwd is required' }`; unexpected errors → `500 { error: string }` (same envelope as `/api/hooks` 4xx — there is no shared error middleware to inherit); route hardcodes `endedOnly: true` + `preferSessionScope: true` (the bridge's ended-sessions-only and session-scope-preferred guarantees).
 - Builder accounting: an `endedOnly` skip consumes a `MAX_CANDIDATES_SCANNED` slot (like a summary-less candidate); `excludeSessionId` is transparent (pre-scan check).
 - File naming kebab-case; imports use ESM `.js` suffixes; no upward/sideways package imports — cross-package only via `package.json#exports`.
 - Biome owns formatting: run `pnpm lint:fix` before committing if lint complains.
@@ -34,7 +34,7 @@
 
 **Interfaces:**
 - Consumes (existing): `store.storage.listSessions(limit: number, opts?: { cwd?: string | null }): SessionRow[]` (`packages/storage/src/storage.ts:171`); `store.storage.listSummaries(sessionId: string): SummaryRow[]` (`storage.ts:295`); `SessionRow.ended_at: number | null`; `SummaryRow.compressed: 0 | 1`.
-- Produces (Tasks 2 and 3 rely on this): `buildPriorContext(store: MemoryStore, opts: { cwd: string | null; excludeSessionId?: string; endedOnly?: boolean }): PriorContextHint[]` where `PriorContextHint = { sessionId: string; content: string; compressed: boolean }`, exported from `@cavemem/hooks` (no `package.json` exports edit needed — single tsup entry re-exports via `index.ts`).
+- Produces (Tasks 2 and 3 rely on this): `buildPriorContext(store: MemoryStore, opts: { cwd: string | null; excludeSessionId?: string; endedOnly?: boolean; preferSessionScope?: boolean }): PriorContextHint[]` where `PriorContextHint = { sessionId: string; content: string; compressed: boolean }`, exported from `@cavemem/hooks` (no `package.json` exports edit needed — single tsup entry re-exports via `index.ts`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -191,6 +191,13 @@ export interface BuildPriorContextOptions {
    * arbitrarily far back (WP #222 review, item A1).
    */
   endedOnly?: boolean;
+  /**
+   * Prefer the session-scope rollup when a candidate has one, falling back to
+   * the newest summary of any scope. Matches the bridge local path's
+   * selection; `sessionStart` omits the flag and keeps its historical
+   * first-any-scope behavior (WP #222 PR review).
+   */
+  preferSessionScope?: boolean;
 }
 
 export function buildPriorContext(
@@ -205,7 +212,10 @@ export function buildPriorContext(
     if (scanned >= MAX_CANDIDATES_SCANNED) break;
     scanned++;
     if (opts.endedOnly && s.ended_at === null) continue;
-    const summary = store.storage.listSummaries(s.id)[0];
+    const summaries = store.storage.listSummaries(s.id);
+    const summary = opts.preferSessionScope
+      ? (summaries.find((x) => x.scope === 'session') ?? summaries[0])
+      : summaries[0];
     if (!summary) continue;
     hints.push({
       sessionId: s.id,
@@ -357,10 +367,11 @@ import { buildPriorContext, type HookInput, type HookName, runHook } from '@cave
 ```ts
   // Prior-session priming for remote clients (WP #222): the opencode bridge
   // fetches its system-prompt hints here instead of reading the empty
-  // client-local store. Ended sessions only — the bridge's guarantee; scan
-  // caps and exclusion semantics live in buildPriorContext. 500s use the
-  // same { error } envelope as the /api/hooks 4xx responses; there is no
-  // shared error middleware to inherit.
+  // client-local store. Ended sessions only, and session-scope summaries
+  // preferred (any-scope fallback) — both are the bridge's local-path
+  // guarantees; scan caps and exclusion semantics live in buildPriorContext.
+  // 500s use the same { error } envelope as the /api/hooks 4xx responses;
+  // there is no shared error middleware to inherit.
   app.get('/api/context', (c) => {
     const cwd = c.req.query('cwd');
     if (!cwd) return c.json({ error: 'cwd is required' }, 400);
@@ -373,6 +384,7 @@ import { buildPriorContext, type HookInput, type HookName, runHook } from '@cave
           // `undefined`; absent/empty `exclude` must stay absent.
           ...(exclude ? { excludeSessionId: exclude } : {}),
           endedOnly: true,
+          preferSessionScope: true,
         }),
       });
     } catch (err) {
@@ -620,6 +632,13 @@ function errorName(err: unknown): string {
 
     try {
       if (remote) {
+        // /api/context rejects unscoped reads by design (400 guaranteed);
+        // the local path treats a falsy directory as "no scoping" and still
+        // primes. Skipping beats a doomed round-trip (WP #222 PR review).
+        if (!directory) {
+          log(`retrieval for ${sessionID}: skipped (no directory to scope by)`);
+          return '';
+        }
         const u = new URL('/api/context', remote.url);
         u.searchParams.set('cwd', directory);
         u.searchParams.set('exclude', sessionID);
@@ -728,7 +747,7 @@ git commit --author="Erick <chiefmojo@chiefmojo.com>" -m "fix: prime opencode re
 In `docs/remote.md`, add to the endpoint list, next to the `/api/search` entry:
 
 ```
-GET /api/context?cwd=<dir>&exclude=<sessionId> — prior-session summary hints for OpenCode priming (bearer; 400 without cwd; ended sessions only; scan cap 10; max 3 hints)
+GET /api/context?cwd=<dir>&exclude=<sessionId> — prior-session summary hints for OpenCode priming (bearer; 400 without cwd; ended sessions only; scan cap 10; max 3 hints; session-scope summaries preferred)
 ```
 
 - [ ] **Step 2: Update the three codemaps**

@@ -24,6 +24,16 @@ export interface BuildPriorContextOptions {
    * arbitrarily far back (WP #222 review, item A1).
    */
   endedOnly?: boolean;
+  /**
+   * Prefer the session-scope rollup when a candidate has one, falling back to
+   * the newest summary of any scope. The opencode bridge's local path always
+   * selected the session rollup (`find(s => s.scope === 'session')`), so
+   * remote priming must too: a late turn summary (newer ts, or a same-ms tie)
+   * would otherwise shadow the rollup the next session primes with (WP #222
+   * PR review). `sessionStart` omits the flag and keeps its historical
+   * first-any-scope behavior.
+   */
+  preferSessionScope?: boolean;
 }
 
 export function buildPriorContext(
@@ -42,7 +52,12 @@ export function buildPriorContext(
     if (scanned >= MAX_CANDIDATES_SCANNED) break;
     scanned++;
     if (opts.endedOnly && s.ended_at === null) continue;
-    const summary = store.storage.listSummaries(s.id)[0];
+    // preferSessionScope: session rollup when one exists, else the newest
+    // summary of any scope (the fallback sessionStart has always used).
+    const summaries = store.storage.listSummaries(s.id);
+    const summary = opts.preferSessionScope
+      ? (summaries.find((x) => x.scope === 'session') ?? summaries[0])
+      : summaries[0];
     if (!summary) continue;
     hints.push({
       sessionId: s.id,

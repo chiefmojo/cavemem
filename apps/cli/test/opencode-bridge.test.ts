@@ -51,7 +51,10 @@ describe('opencode-bridge prior-context priming', () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  async function loadBridge(settings: Record<string, unknown>): Promise<{
+  async function loadBridge(
+    settings: Record<string, unknown>,
+    directory = '/proj',
+  ): Promise<{
     'experimental.chat.system.transform': SystemTransform;
     event: EventHook;
   }> {
@@ -60,7 +63,7 @@ describe('opencode-bridge prior-context priming', () => {
       JSON.stringify({ embedding: { provider: 'none' }, ...settings }),
     );
     const mod = await import('../src/opencode-bridge.js');
-    const hooks = (await mod.default({ $: {} as never, directory: '/proj' })) as Record<
+    const hooks = (await mod.default({ $: {} as never, directory })) as Record<
       string,
       SystemTransform | EventHook
     >;
@@ -268,6 +271,27 @@ describe('opencode-bridge prior-context priming', () => {
       '--ide',
       'opencode',
     ]);
+  });
+
+  it('remote mode skips the fetch when the plugin directory is empty', async () => {
+    // /api/context rejects unscoped reads by design (400), while the local
+    // path treats a falsy directory as "no scoping" and still primes — so an
+    // empty directory must skip priming instead of round-tripping a
+    // guaranteed 400.
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ hints: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const system = await prime(
+      await loadBridge(
+        { remote: { url: 'http://worker:37777', token: 'tok', timeoutMs: 200 } },
+        '',
+      ),
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(system.join('\n')).not.toContain('Prior context');
   });
 
   it('local mode reads the client-local store exactly as before', async () => {

@@ -181,6 +181,13 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
 
     try {
       if (remote) {
+        // /api/context rejects unscoped reads by design (privacy — a 400 is
+        // guaranteed), while the local path treats a falsy directory as "no
+        // scoping" and still primes. Skipping beats a doomed round-trip.
+        if (!directory) {
+          log(`retrieval for ${sessionID}: skipped (no directory to scope by)`);
+          return '';
+        }
         const u = new URL('/api/context', remote.url);
         u.searchParams.set('cwd', directory);
         u.searchParams.set('exclude', sessionID);

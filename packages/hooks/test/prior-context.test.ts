@@ -119,6 +119,47 @@ describe('buildPriorContext', () => {
     expect(hints[2]?.compressed).toBe(false);
   });
 
+  it('preferSessionScope returns the session rollup even when a turn summary is newer', async () => {
+    // The bridge fires `stop` (turn summary) and `session-end` (session
+    // rollup) as two detached spawns — the rollup can land with an older ts
+    // than the late turn summary. Bridge-local selection preferred the
+    // rollup; remote priming must too.
+    await seedEnded('dual', '/proj');
+    store.storage.insertSummary({
+      session_id: 'dual',
+      scope: 'session',
+      content: 'session rollup',
+      compressed: false,
+      intensity: null,
+      ts: 1000,
+    });
+    store.storage.insertSummary({
+      session_id: 'dual',
+      scope: 'turn',
+      content: 'raw last turn',
+      compressed: false,
+      intensity: null,
+      ts: 2000,
+    });
+
+    // Bridge parity: the rollup wins over the newer raw turn.
+    expect(
+      buildPriorContext(store, { cwd: '/proj', preferSessionScope: true }).map((h) => h.content),
+    ).toEqual(['session rollup']);
+    // sessionStart parity (no flag): first-any-scope — the newer turn summary.
+    expect(buildPriorContext(store, { cwd: '/proj' }).map((h) => h.content)).toEqual([
+      'raw last turn',
+    ]);
+  });
+
+  it('preferSessionScope falls back to the newest summary when no rollup exists', async () => {
+    await seedEnded('turn-only', '/proj', { content: 'only a turn', scope: 'turn' });
+
+    expect(
+      buildPriorContext(store, { cwd: '/proj', preferSessionScope: true }).map((h) => h.content),
+    ).toEqual(['only a turn']);
+  });
+
   it('returns [] when nothing matches', () => {
     expect(buildPriorContext(store, { cwd: '/nothing' })).toEqual([]);
   });

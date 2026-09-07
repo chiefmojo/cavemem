@@ -375,6 +375,41 @@ describe('Storage', () => {
     expect(storage.countEmbeddings({ model: 'm', dim: 2 })).toBe(0);
   });
 
+  it('listSummaries breaks same-ts ties newest-inserted-first', () => {
+    storage.createSession({
+      id: 'tie-1',
+      ide: 'claude-code',
+      cwd: null,
+      started_at: Date.now(),
+      metadata: null,
+    });
+    const sameTs = 1_700_000_000_000;
+    // The bridge's detached stop/session-end spawns can insert both summaries
+    // within the same millisecond — ordering must stay deterministic (highest
+    // rowid, i.e. latest insert, first) or hint selection flips between them.
+    storage.insertSummary({
+      session_id: 'tie-1',
+      scope: 'session',
+      content: 'inserted first',
+      compressed: true,
+      intensity: 'full',
+      ts: sameTs,
+    });
+    storage.insertSummary({
+      session_id: 'tie-1',
+      scope: 'turn',
+      content: 'inserted second',
+      compressed: true,
+      intensity: 'full',
+      ts: sameTs,
+    });
+
+    expect(storage.listSummaries('tie-1').map((s) => s.content)).toEqual([
+      'inserted second',
+      'inserted first',
+    ]);
+  });
+
   it('summaryCoverage counts turn summaries per IDE, ignoring session scope', () => {
     storage.createSession({
       id: 'cov-a1',

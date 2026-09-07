@@ -154,6 +154,36 @@ describe('worker HTTP', () => {
     });
   });
 
+  it('context: route prefers session-scope summaries over newer turn summaries', async () => {
+    // The bridge's detached stop/session-end spawns race: the late turn
+    // summary can carry a newer ts than the session rollup. Remote priming
+    // must return the rollup, matching the bridge's local selection
+    // (preferSessionScope: true hardcoded on the route).
+    await seedContextSession('ctx-mixed', '/proj');
+    store.storage.insertSummary({
+      session_id: 'ctx-mixed',
+      scope: 'session',
+      content: 'session rollup',
+      compressed: false,
+      intensity: null,
+      ts: 1000,
+    });
+    store.storage.insertSummary({
+      session_id: 'ctx-mixed',
+      scope: 'turn',
+      content: 'raw last turn',
+      compressed: false,
+      intensity: null,
+      ts: 2000,
+    });
+
+    const res = await apiReq('/api/context?cwd=/proj');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      hints: [{ sessionId: 'ctx-mixed', content: 'session rollup', compressed: false }],
+    });
+  });
+
   it('context: empty store yields an empty hints array', async () => {
     const res = await apiReq('/api/context?cwd=/proj');
     expect(res.status).toBe(200);
