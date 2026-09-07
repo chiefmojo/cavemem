@@ -153,8 +153,8 @@ export function registerConfigCommand(program: Command): void {
       if (getDotted(settings, key) === undefined) {
         // Absent keys: unknown paths error, but a known schema path that is
         // simply not set is a no-op success — keeps unset idempotent for
-        // runbooks/scripts (e.g. remote.token absent when the client
-        // authenticates via CAVEMEM_REMOTE_TOKEN).
+        // runbooks/scripts (e.g. remote.token never set: tokenless worker
+        // on a trusted LAN; hooks fail open without a token).
         if (!isKnownSettingPath(key)) {
           process.stderr.write(`${kleur.red('unknown key:')} ${key}\n`);
           process.exitCode = 1;
