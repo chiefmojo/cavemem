@@ -12,18 +12,19 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { antigravity } from '../src/antigravity.js';
 import { augment } from '../src/augment.js';
 import { bob } from '../src/bob.js';
 import { claudeCode } from '../src/claude-code.js';
-import { codex, codexRemoteTokenHint } from '../src/codex.js';
+import { codex, codexMcpMode, codexRemoteTokenHint, codexWslWarning } from '../src/codex.js';
 import { copilot } from '../src/copilot.js';
 import { cursor } from '../src/cursor.js';
 import { deepMerge, shellQuote } from '../src/fs-utils.js';
 import { findForeignBridges, openCode } from '../src/opencode.js';
 import { getInstaller, installers } from '../src/registry.js';
 import type { InstallContext } from '../src/types.js';
+import { syncWindowsUserEnvVar } from '../src/windows-env.js';
 import { checkWindowsSh, resolveShDefault } from '../src/windows-sh.js';
 
 let home: string;
@@ -798,7 +799,7 @@ describe('remote mode MCP entries', () => {
     expect(after.mcpServers?.cavemem).toBeUndefined();
   });
 
-  it('codex writes url + bearer_token_env_var and prints the export hint', async () => {
+  it('codex writes url + bearer_token_env_var and prints the remote-token hint', async () => {
     mkdirSync(join(home, '.codex'), { recursive: true });
     const msgs = await codex.install({ ...ctx, remote });
     const cfg = parseToml(readFileSync(join(home, '.codex', 'config.toml'), 'utf8')) as {
@@ -808,7 +809,9 @@ describe('remote mode MCP entries', () => {
       url: 'http://neuromancer:37777/mcp',
       bearer_token_env_var: 'CAVEMEM_REMOTE_TOKEN',
     });
-    expect(msgs.join('\n')).toContain('export CAVEMEM_REMOTE_TOKEN=');
+    // The hint is platform-aware (setx on win32, export elsewhere) — assert the
+    // invariant shared by both forms rather than a single platform's spelling.
+    expect(msgs.join('\n')).toContain('CAVEMEM_REMOTE_TOKEN');
     expect(msgs.join('\n')).not.toContain(remote.token);
   });
 
@@ -851,6 +854,101 @@ describe('remote mode MCP entries', () => {
     const json = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'));
     expect(json.mcpServers.cavemem.command).toBe('/fake/bin/node');
     expect(json.mcpServers.cavemem.url).toBeUndefined();
+  });
+});
+
+describe('codexMcpMode / codexWslWarning (#231)', () => {
+  it('reports absent, stdio, and remote mcp_servers.cavemem correctly', async () => {
+    expect(codexMcpMode(home)).toBe('absent');
+    await codex.install(ctx);
+    expect(codexMcpMode(home)).toBe('stdio');
+    await codex.install({ ...ctx, remote: { url: 'http://neuromancer:37777', token: 't' } });
+    expect(codexMcpMode(home)).toBe('remote');
+  });
+
+  it('warns when the Codex config indicates WSL use', async () => {
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    writeFileSync(
+      join(home, '.codex', 'config.toml'),
+      '[desktop]\nintegratedTerminalShell = "wsl"\n',
+    );
+    const messages = await codex.install(ctx);
+    expect(messages.some((m) => m.includes('WSL'))).toBe(true);
+  });
+
+  it('does not warn without WSL signals', async () => {
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    writeFileSync(join(home, '.codex', 'config.toml'), 'model = "gpt-5"\n');
+    const messages = await codex.install(ctx);
+    expect(messages.some((m) => m.includes('WSL'))).toBe(false);
+  });
+
+  it('codexWslWarning is null without desktop WSL keys', () => {
+    expect(codexWslWarning({ model: 'gpt-5' })).toBeNull();
+    expect(codexWslWarning({ desktop: { integratedTerminalShell: 'cmd' } })).toBeNull();
+    expect(codexWslWarning({ desktop: { runCodexInWindowsSubsystemForLinux: true } })).toContain(
+      'WSL',
+    );
+  });
+});
+
+describe('syncWindowsUserEnvVar (#231)', () => {
+  it('is a no-op on non-Windows platforms', () => {
+    const write = vi.fn(() => true);
+    expect(
+      syncWindowsUserEnvVar('K', 'v', {
+        platform: 'linux',
+        readUserEnv: () => null,
+        writeUserEnv: write,
+      }),
+    ).toEqual({ synced: false, changed: false, previous: null });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('writes the value when missing on win32', () => {
+    const write = vi.fn(() => true);
+    expect(
+      syncWindowsUserEnvVar('K', 'v', {
+        platform: 'win32',
+        readUserEnv: () => null,
+        writeUserEnv: write,
+      }),
+    ).toEqual({ synced: true, changed: true, previous: null });
+    expect(write).toHaveBeenCalledWith('K', 'v');
+  });
+
+  it('rewrites when the value has drifted on win32', () => {
+    const write = vi.fn(() => true);
+    expect(
+      syncWindowsUserEnvVar('K', 'new', {
+        platform: 'win32',
+        readUserEnv: () => 'old',
+        writeUserEnv: write,
+      }),
+    ).toEqual({ synced: true, changed: true, previous: 'old' });
+    expect(write).toHaveBeenCalledWith('K', 'new');
+  });
+
+  it('leaves an already-matching value untouched', () => {
+    const write = vi.fn(() => true);
+    expect(
+      syncWindowsUserEnvVar('K', 'v', {
+        platform: 'win32',
+        readUserEnv: () => 'v',
+        writeUserEnv: write,
+      }),
+    ).toEqual({ synced: true, changed: false, previous: 'v' });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('reports unsynced when the write fails', () => {
+    expect(
+      syncWindowsUserEnvVar('K', 'v', {
+        platform: 'win32',
+        readUserEnv: () => null,
+        writeUserEnv: () => false,
+      }),
+    ).toEqual({ synced: false, changed: false, previous: null });
   });
 });
 

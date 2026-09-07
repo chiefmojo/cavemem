@@ -21,6 +21,42 @@ export function codexRemoteTokenHint(platform: NodeJS.Platform = process.platfor
   return `codex reads the bearer token from the environment — add to your shell profile:\n    export ${CODEX_TOKEN_ENV}=<your-cavemem-remote-token>`;
 }
 
+/**
+ * Reads the current Codex MCP wiring for cavemem from
+ * `<ideConfigDir>/.codex/config.toml`, so `doctor` can flag a stdio entry that
+ * was left behind when remote mode became active (WP #231 issue #3).
+ */
+export function codexMcpMode(ideConfigDir: string): 'remote' | 'stdio' | 'absent' {
+  const cfg = readToml(join(ideConfigDir, '.codex', 'config.toml'));
+  const servers = cfg.mcp_servers as Record<string, Record<string, unknown>> | undefined;
+  const cavemem = servers?.cavemem;
+  if (!cavemem) return 'absent';
+  return typeof cavemem.url === 'string' ? 'remote' : 'stdio';
+}
+
+/**
+ * Warns when a Codex config indicates it runs under WSL (WP #231 issue #5). A
+ * Windows-installed cavemem writes `node.exe` + CLI paths into
+ * `%USERPROFILE%\.codex`, which WSL Codex never reads — it uses `~/.codex`
+ * inside WSL and has no Windows binary on its PATH.
+ */
+export function codexWslWarning(cfg: Record<string, unknown>): string | null {
+  const desktop = cfg.desktop as Record<string, unknown> | undefined;
+  const usesWsl =
+    desktop?.integratedTerminalShell === 'wsl' ||
+    desktop?.runCodexInWindowsSubsystemForLinux === true;
+  if (!usesWsl) return null;
+  return [
+    'This Codex config indicates it runs under WSL (integratedTerminalShell /',
+    'runCodexInWindowsSubsystemForLinux). This install writes Windows paths',
+    '(node.exe + the cavemem CLI) into %USERPROFILE%\\.codex, which WSL Codex does',
+    'not read — it uses ~/.codex inside WSL and has no Windows binary on its PATH.',
+    '',
+    'fix: run `cavemem install --ide codex` *inside* WSL (Linux node + $HOME/.codex)',
+    'for WSL sessions, or reference the Windows binary via /mnt/c/... interop.',
+  ].join('\n');
+}
+
 interface CodexHookCommand {
   type: 'command';
   command: string;
@@ -96,6 +132,7 @@ export const codex: Installer = {
     // `features.hooks` is the canonical key; `codex_hooks` is a deprecated
     // alias that still works but emits a startup warning.
     const cfg = readToml(cfgPath);
+    const wslWarning = codexWslWarning(cfg);
 
     const features = (cfg.features as Record<string, unknown> | undefined) ?? {};
     features.hooks = true;
@@ -153,6 +190,7 @@ export const codex: Installer = {
 
     writeJson(hooksPath, { ...hooks, hooks: hookMap });
     messages.push(`wrote ${hooksPath}`);
+    if (wslWarning) messages.push(wslWarning);
 
     return messages;
   },

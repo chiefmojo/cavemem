@@ -29,6 +29,16 @@ vi.mock('@cavemem/storage', () => ({
 
 vi.mock('@cavemem/worker', () => ({ start: boundaries.worker }));
 vi.mock('@cavemem/mcp-server', () => ({ main: boundaries.mcp }));
+vi.mock('@cavemem/installers', () => ({
+  CODEX_TOKEN_ENV: 'CAVEMEM_REMOTE_TOKEN',
+  codexMcpMode: () => 'remote',
+  checkWindowsSh: () => null,
+  installers: {},
+  getInstaller: () => {
+    throw new Error('no installer wired in this test');
+  },
+  syncWindowsUserEnvVar: () => ({ synced: true, changed: false, previous: null }),
+}));
 
 let dir: string;
 let originalHome: string | undefined;
@@ -112,7 +122,9 @@ describe('remote CLI commands', () => {
     expect(out).toContain('token:    present');
     expect(out).toContain('server:   ok');
     expect(out).toContain('auth:     ok');
-    expect(out).toContain('CAVEMEM_REMOTE_TOKEN not set');
+    expect(out).toContain(
+      process.platform === 'win32' ? 'CAVEMEM_REMOTE_TOKEN present' : 'CAVEMEM_REMOTE_TOKEN not set',
+    );
     expect(out).toContain('cavemem config unset remote.url');
     expect(out).toContain('cavemem stop');
     expect(out).toContain('restore remote.url');

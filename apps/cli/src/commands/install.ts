@@ -7,7 +7,14 @@ import {
   saveSettings,
   settingsPath,
 } from '@cavemem/config';
-import { type IdeName, checkWindowsSh, getInstaller, installers } from '@cavemem/installers';
+import {
+  CODEX_TOKEN_ENV,
+  type IdeName,
+  checkWindowsSh,
+  getInstaller,
+  installers,
+  syncWindowsUserEnvVar,
+} from '@cavemem/installers';
 import type { Command } from 'commander';
 import kleur from 'kleur';
 import { checkedRemoteTarget } from '../util/remote.js';
@@ -55,6 +62,20 @@ export function registerInstallCommand(program: Command): void {
       const installer = getInstaller(name);
       const msgs = await installer.install(ctx);
       for (const m of msgs) process.stdout.write(`${kleur.green('✓')} ${m}\n`);
+
+      // Remote Codex reads the bearer token from its own process environment
+      // at startup, so on native Windows persist it into the user environment
+      // via `setx` — a shell-profile `export` has no effect there (WP #231 #4).
+      // Non-Windows is a no-op; `codexRemoteTokenHint` printed above covers it.
+      if (name === 'codex' && ctx.remote) {
+        const sync = syncWindowsUserEnvVar(CODEX_TOKEN_ENV, ctx.remote.token);
+        if (sync.changed) {
+          process.stdout.write(
+            `${kleur.green('✓')} persisted ${CODEX_TOKEN_ENV} to your Windows user environment (new terminals + Codex sessions inherit it)\n`,
+          );
+        }
+      }
+
       settings.ides[name] = true;
       saveSettings(settings);
 
