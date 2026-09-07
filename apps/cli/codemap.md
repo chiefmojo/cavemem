@@ -27,7 +27,7 @@ Sub-packages are *not* runtime dependencies: `apps/mcp-server`, `apps/worker`, a
 - Install path: `cavemem install --ide X` → `resolveCliPath()` → `installer.install(ctx)` writes IDE config (hooks + MCP registration) → `settings.ides[X] = true`.
 - Daemon path: `cavemem start` → pidfile `dataDir/worker.pid` → detached `node <cli> worker run` → `@cavemem/worker#start()` (viewer HTTP + embedding backfill loop); state surfaces back via `dataDir/worker.state.json` in `cavemem status`.
 - Remote mode: with `settings.remote.url` set, `search` GETs `<remote.url>/api/search` (bearer `remote.token`), `doctor`/`status` probe the server (`/healthz` + authenticated `/api/state`), and local-only commands exit 1 with "run `cavemem <cmd>` on the server" — the daemon, store, and viewer live on the server machine (`apps/worker`); `hook run` dispatches to `<remote.url>/api/hooks/<name>` inside `@cavemem/hooks#runHook`, so `hook.ts` needs no mode check.
-- OpenCode path: OpenCode loads `dist/opencodeBridge.js` → events/streams mapped to `cavemem hook run … --ide opencode` (fire-and-forget spawns); context priming reads the store directly.
+- opencode-bridge.ts — plugin; writes fire-and-forget via CLI hooks; priming reads the local store, or /api/context on the worker in remote mode (WP #222)
 - Publish path: `changeset publish` → `prepublishOnly`/`prepack` (`scripts/prepack.mjs` stages README/LICENSE/hooks-scripts) → packed tarball. Fallback: `pnpm publish:release` → `scripts/pack-release.mjs` builds `release/` for `npm publish ./release`.
 
 ## Integration

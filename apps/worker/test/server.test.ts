@@ -45,6 +45,30 @@ async function apiReq(path: string, init: RequestInit = {}): Promise<Response> {
   return req(path, { ...init, headers });
 }
 
+const tick = () => new Promise((r) => setTimeout(r, 2));
+
+async function seedContextSession(
+  id: string,
+  cwd: string,
+  opts: {
+    ended?: boolean;
+    summary?: { content: string; compressed?: 0 | 1; scope?: 'turn' | 'session' };
+  } = {},
+): Promise<void> {
+  await tick();
+  store.startSession({ id, ide: 'opencode', cwd, metadata: null });
+  if (opts.summary) {
+    store.storage.insertSummary({
+      session_id: id,
+      scope: opts.summary.scope ?? 'session',
+      content: opts.summary.content,
+      compressed: opts.summary.compressed === 1,
+      intensity: null,
+    });
+  }
+  if (opts.ended !== false) store.endSession(id);
+}
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'cavemem-worker-'));
   store = new MemoryStore({ dbPath: join(dir, 'data.db'), settings: defaultSettings });
@@ -89,6 +113,81 @@ describe('worker HTTP', () => {
     expect(res.status).toBe(200);
     const hits = (await res.json()) as Array<{ id: number; snippet: string }>;
     expect(hits.length).toBeGreaterThan(0);
+  });
+
+  it('context: returns 401 without a token', async () => {
+    const res = await req('/api/context?cwd=/proj');
+    expect(res.status).toBe(401);
+  });
+
+  it('context: returns 400 without cwd', async () => {
+    const res = await apiReq('/api/context');
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe('cwd is required');
+  });
+
+  it('context: returns cwd-scoped ended-session hints with compressed normalized', async () => {
+    await seedContextSession('ctx-a', '/proj', { summary: { content: 'alpha', compressed: 1 } });
+    await seedContextSession('ctx-new', '/proj', { summary: { content: 'newest' } });
+    await seedContextSession('ctx-other', '/elsewhere', { summary: { content: 'beta' } });
+
+    const res = await apiReq('/api/context?cwd=/proj&exclude=ctx-new');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      hints: [{ sessionId: 'ctx-a', content: 'alpha', compressed: true }],
+    });
+  });
+
+  it('context: route is endedOnly — an in-flight turn summary is never hinted', async () => {
+    // Same cwd, same summary shape as a real mid-session turn: if the route
+    // dropped `endedOnly: true`, the builder would leak this into priming.
+    await seedContextSession('ctx-inflight', '/proj', {
+      ended: false,
+      summary: { content: 'inflight turn note', scope: 'turn' },
+    });
+    await seedContextSession('ctx-ended', '/proj', { summary: { content: 'ended session note' } });
+
+    const res = await apiReq('/api/context?cwd=/proj');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      hints: [{ sessionId: 'ctx-ended', content: 'ended session note', compressed: false }],
+    });
+  });
+
+  it('context: route prefers session-scope summaries over newer turn summaries', async () => {
+    // The bridge's detached stop/session-end spawns race: the late turn
+    // summary can carry a newer ts than the session rollup. Remote priming
+    // must return the rollup, matching the bridge's local selection
+    // (preferSessionScope: true hardcoded on the route).
+    await seedContextSession('ctx-mixed', '/proj');
+    store.storage.insertSummary({
+      session_id: 'ctx-mixed',
+      scope: 'session',
+      content: 'session rollup',
+      compressed: false,
+      intensity: null,
+      ts: 1000,
+    });
+    store.storage.insertSummary({
+      session_id: 'ctx-mixed',
+      scope: 'turn',
+      content: 'raw last turn',
+      compressed: false,
+      intensity: null,
+      ts: 2000,
+    });
+
+    const res = await apiReq('/api/context?cwd=/proj');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      hints: [{ sessionId: 'ctx-mixed', content: 'session rollup', compressed: false }],
+    });
+  });
+
+  it('context: empty store yields an empty hints array', async () => {
+    const res = await apiReq('/api/context?cwd=/proj');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ hints: [] });
   });
 
   it('GET / renders the session index HTML', async () => {
