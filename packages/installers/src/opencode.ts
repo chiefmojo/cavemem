@@ -48,6 +48,10 @@ function legacyConfigFile(ctx: InstallContext): string {
   return join(ctx.ideConfigDir, '.opencode', 'config.json');
 }
 
+function bridgeMetaFile(ctx: InstallContext): string {
+  return join(configRoot(ctx), 'cavemem-bridge.json');
+}
+
 /** Foreign bridge: a plugin in the OpenCode plugins dir that talks to cavemem but isn't our symlinked bridge. */
 export function findForeignBridges(pluginsDir: string, bridgeSource: string): string[] {
   let entries: string[];
@@ -132,6 +136,13 @@ export const openCode: Installer = {
     writeJson(path, next);
     messages.push(`wrote ${path}`);
 
+    // Record the absolute node binary for the bridge plugin, independent of MCP
+    // transport — remote mode has no `command` array to read it from, but the
+    // bridge still spawns the local CLI. The bridge reads this sidecar to
+    // resolve the runtime for hook spawns.
+    writeFileSync(bridgeMetaFile(ctx), `${JSON.stringify({ nodeBin: ctx.nodeBin })}\n`, 'utf8');
+    messages.push(`wrote ${bridgeMetaFile(ctx)}`);
+
     // 2. Symlink the bridge plugin into the OpenCode plugins directory.
     const bridgeSource = join(dirname(ctx.cliPath), 'opencodeBridge.js');
     const pluginsDir = pluginDir(ctx);
@@ -205,6 +216,13 @@ export const openCode: Installer = {
     if (existsSync(link)) {
       unlinkSync(link);
       messages.push(`removed plugin symlink ${link}`);
+    }
+
+    // 3. Remove the bridge metadata sidecar.
+    const meta = bridgeMetaFile(ctx);
+    if (existsSync(meta)) {
+      unlinkSync(meta);
+      messages.push(`removed ${meta}`);
     }
 
     return messages;
