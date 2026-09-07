@@ -199,10 +199,35 @@ curl -sS -H "Authorization: Bearer <token>" \
    cavemem install --ide codex
    cavemem install --ide opencode
    ```
-5. Codex only — add to the shell profile:
+   `cavemem install` only rewrites the **canonical** config for each IDE
+   (`~/.config/opencode/opencode.json`, `~/.codex/config.toml`, the Claude Code
+   MCP config). A box that has been running cavemem for a while can carry a
+   **stale stdio entry in a second location** an earlier install wrote — most
+   commonly `~/.opencode/opencode.json` or `~/.opencode/config.json`, which
+   OpenCode still finds by walking up from the project dir and which then
+   overrides the canonical remote entry (`server unavailable … type=local`).
+   Grep for leftovers before trusting the cutover:
    ```bash
-   export CAVEMEM_REMOTE_TOKEN=<token>
+   grep -rl --include='*.json' --include='*.toml' cavemem \
+     ~/.opencode ~/.config/opencode ~/.codex ~/.claude* 2>/dev/null
    ```
+   Move any non-canonical hit aside (`.bak-preremote`) and re-test.
+5. Codex only — codex reads the bearer from its environment
+   (`bearer_token_env_var`); inline `bearer_token` is rejected for
+   streamable-http transports. The variable must be visible to
+   **non-interactive** shells, because codex is frequently launched from a
+   wrapper or another process, not a login prompt. A plain
+   `export` near the end of `~/.bashrc` is **not** enough — the stock
+   `case $- in *i*) ;; *) return;; esac` guard near the top of `~/.bashrc`
+   returns before it. Put it in one of:
+   ```bash
+   # ~/.bashrc — ABOVE the non-interactive guard
+   export CAVEMEM_REMOTE_TOKEN=<token>
+
+   # or ~/.config/environment.d/cavemem.conf  (systemd --user + graphical session)
+   CAVEMEM_REMOTE_TOKEN=<token>
+   ```
+   Then start a fresh shell and confirm: `bash -lc 'echo ${CAVEMEM_REMOTE_TOKEN:+set}'`.
 6. Verify again:
    ```bash
    cavemem doctor          # codex: warning clears once the env var is set; spool: N queued
@@ -221,6 +246,15 @@ Local-only commands (`worker *`, `start`, `stop`, `restart`, `viewer`,
 
 - **Migrated data reachable:** from `wintermute`, `cavemem search "<phrase from
   the migrated store>"` returns hits.
+- **Per-IDE MCP path, each one explicitly.** `cavemem doctor` only proves the
+  CLI's own remote wiring — it does not exercise any IDE's MCP client. Drive a
+  `cavemem` search tool call from **each** configured IDE and confirm it returns
+  hits from the central store:
+  - Claude Code — `mcp__cavemem__search` in a session.
+  - OpenCode — `opencode run 'call the cavemem search tool …'`; watch for
+    `server unavailable … type=local` in `~/.local/share/opencode/log/`.
+  - Codex — `codex exec 'call the cavemem search tool …'`; expect
+    `mcp: cavemem/search (completed)`, not an auth error.
 - **Cross-machine round-trip:** start a Claude Code session on `wintermute`, say
   something distinctive, end it. `cavemem search` for that phrase — then run a
   `search` from a Codex MCP call. Both hit the same central store.
