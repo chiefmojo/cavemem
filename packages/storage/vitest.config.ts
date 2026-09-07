@@ -1,4 +1,5 @@
 import { configDefaults, defineConfig } from 'vitest/config';
+import { srcAliases } from '../../vitest.shared';
 
 export default defineConfig({
   test: {
@@ -6,4 +7,5 @@ export default defineConfig({
     // it imports 'bun:sqlite'/'bun:test', which don't resolve under Node.
     exclude: [...configDefaults.exclude, 'src/bun.test.ts'],
   },
+  resolve: { alias: srcAliases },
 });

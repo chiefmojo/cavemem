@@ -385,13 +385,21 @@ describe('worker token file', () => {
     rmSync(tokenDir, { recursive: true, force: true });
   });
 
-  it('creates a token file with mode 0600 on first call', () => {
+  it('creates a token file on first call', () => {
     const settings = { ...defaultSettings, dataDir: tokenDir };
     const token = getOrCreateToken(settings);
     expect(token).toMatch(/^[0-9a-f]{64}$/);
-    const tokenPath = join(tokenDir, 'worker-token');
-    expect(existsSync(tokenPath)).toBe(true);
-    expect(statSync(tokenPath).mode & 0o777).toBe(0o600);
+    expect(existsSync(join(tokenDir, 'worker-token'))).toBe(true);
+  });
+
+  // chmod 0o600 is POSIX-only: on Windows chmodSync merely toggles the
+  // read-only attribute, so statSync().mode reports 0o666 for a writable file
+  // and the 0600 assertion cannot hold (security.ts already treats the chmod
+  // as best-effort with a try/catch for this reason).
+  it.skipIf(process.platform === 'win32')('sets the token file mode to 0600', () => {
+    const settings = { ...defaultSettings, dataDir: tokenDir };
+    getOrCreateToken(settings);
+    expect(statSync(join(tokenDir, 'worker-token')).mode & 0o777).toBe(0o600);
   });
 
   it('reuses the existing token on subsequent calls', () => {
