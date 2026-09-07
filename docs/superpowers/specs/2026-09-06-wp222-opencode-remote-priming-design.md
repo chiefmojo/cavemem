@@ -79,7 +79,7 @@ Exported through `packages/hooks` package exports (worker already depends on `@c
 ### 5. Error handling & privacy
 
 - Fail-open: timeout, 401, non-2xx, malformed JSON → log + return `''`; the IDE never waits on cavemem beyond the configured timeout.
-- Worst-case added latency: one ≤ `remote.timeoutMs` (default 1500 ms) round-trip per session, only on the first `system.transform` of a session.
+- Worst-case added latency: one ≤ `remote.timeoutMs` (default 1500 ms) round-trip per fetch. The `queriedSessions` guard suppresses repeat fetches only until the existing `session.idle`/`session.deleted` reset re-enables the session — not for the session's entire lifetime.
 - Token never logged; the endpoint requires `cwd`, and scoping is enforced server-side in SQL.
 - Host/Origin allowlist and bearer auth apply to the new route as to all `/api/*` routes.
 

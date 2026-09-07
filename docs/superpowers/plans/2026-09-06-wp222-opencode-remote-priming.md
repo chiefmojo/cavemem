@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Local-mode bridge behavior and `sessionStart` output are byte-identical to today; existing `packages/hooks/test/runner.test.ts` must pass **unmodified** as the proof.
-- Fail-open: plugin init and `getRecentContext` never throw; worst case is one ≤ `remote.timeoutMs` (default 1500 ms) fetch per session. The IDE is never blocked beyond that.
+- Fail-open: plugin init and `getRecentContext` never throw; worst case is one ≤ `remote.timeoutMs` (default 1500 ms) round-trip per fetch — the `queriedSessions` guard suppresses repeat fetches only until the existing `session.idle`/`session.deleted` reset re-enables the session, not for the session's entire lifetime. The IDE is never blocked beyond that.
 - The remote token is never logged.
 - `GET /api/context`: behind the worker's existing `bearerAuth` middleware (no extra wiring); `cwd` required → `400 { error: 'cwd is required' }`; unexpected errors → `500 { error: string }` (same envelope as `/api/hooks` 4xx — there is no shared error middleware to inherit); route hardcodes `endedOnly: true` (the bridge's ended-sessions-only guarantee).
 - Builder accounting: an `endedOnly` skip consumes a `MAX_CANDIDATES_SCANNED` slot (like a summary-less candidate); `excludeSessionId` is transparent (pre-scan check).
