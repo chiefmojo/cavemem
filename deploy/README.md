@@ -92,10 +92,25 @@ scp apps/cli/cavemem-<version>.tgz agentops@neuromancer:~
 ssh agentops@neuromancer 'npm install -g ~/cavemem-<version>.tgz && cavemem --version'
 ```
 
+Record the artifact's provenance now — the §5 comment needs it: `cavemem
+--version` from the server, and the `main` commit the tgz was built from
+(`git rev-parse --short main` on `wintermute`).
+
 ### 1c. Migrate the live store (run on `wintermute` as `chiefmojo`)
 
 This is the cutover's only real downtime — the local worker stops, the DB is
 checkpointed, then copied. The local store stays on disk as a fallback.
+
+> **No live coding sessions during this window.** In local mode any IDE hook
+> auto-spawns a fresh worker (`packages/hooks/src/auto-spawn.ts` — suppressed
+> only by remote mode, `CAVEMEM_NO_AUTOSTART`, `embedding.autoStart: false`, or
+> `embedding.provider: none`), which would write to `data.db` mid-copy. Close
+> every coding session on `wintermute`, and re-check
+> `pgrep -f 'worker (run|start)'` immediately before the checkpoint.
+> Belt-and-suspenders:
+> `cavemem config set embedding.autoStart false` for the window; restore with
+> `cavemem config set embedding.autoStart true` after cutover (remote-mode
+> hooks never auto-spawn).
 
 ```bash
 cavemem stop                                             # confirm no `worker run` process remains
@@ -138,6 +153,10 @@ sudo chown agentops:agentops /home/agentops/legacy-faye-cavemem-2026-09-02.tgz
 
 ### 1f. systemd unit
 
+> **Order matters:** do not `enable --now` before the store has landed (1c).
+> The worker would create a fresh empty `data.db`, and the 1c rsync would then
+> stack the live DB on top of it.
+
 ```bash
 sudo cp deploy/cavemem-worker.service /etc/systemd/system/
 sudo systemd-analyze verify /etc/systemd/system/cavemem-worker.service
@@ -170,26 +189,31 @@ curl -sS -H "Authorization: Bearer <token>" \
    cavemem config set remote.url http://neuromancer:37777
    cavemem config set remote.token <token>
    ```
-3. Rewrite IDE MCP entries (stdio → remote):
+3. Verify the server **before** rewiring IDEs into it:
+   ```bash
+   cavemem doctor          # mode: remote …, token: present, server: ok, auth: ok
+   ```
+4. Rewrite IDE MCP entries (stdio → remote):
    ```bash
    cavemem install --ide claude-code
    cavemem install --ide codex
    cavemem install --ide opencode
    ```
-4. Codex only — add to the shell profile:
+5. Codex only — add to the shell profile:
    ```bash
    export CAVEMEM_REMOTE_TOKEN=<token>
    ```
-5. Verify:
+6. Verify again:
    ```bash
-   cavemem doctor          # server: ok, auth: ok
+   cavemem doctor          # codex: warning clears once the env var is set; spool: N queued
    ```
-6. Leave local `~/.cavemem/data.db` in place as a fallback. Delete it only after
+7. Leave local `~/.cavemem/data.db` in place as a fallback. Delete it only after
    the server has been validated for a few days.
 
 Local-only commands (`worker *`, `start`, `stop`, `restart`, `viewer`,
 `reindex`, `export`, `import`, `mcp`) now refuse with
-`remote mode: run this on the server` — run them on `neuromancer` as `agentops`.
+``remote mode: run `cavemem <command>` on the server (<url>)`` — run them on
+`neuromancer` as `agentops`.
 
 ---
 
@@ -214,11 +238,15 @@ Local-only commands (`worker *`, `start`, `stop`, `restart`, `viewer`,
 Per-client, no server teardown needed:
 
 ```bash
-cavemem config unset remote.url
-cavemem config unset remote.token
+cavemem config open     # delete the whole "remote": { … } block, save
 cavemem install --ide claude-code --ide codex --ide opencode   # rewrites stdio entries
 cavemem start
 ```
+
+Hand-editing is the sanctioned path: `config` has no `unset` subcommand, and
+`config set remote.url ""` fails schema validation (the value must be a real
+`http(s)://` URL). Same remediation `cavemem doctor` suggests for a stale local
+pidfile. A `config unset <key>` subcommand is tracked as WP #219.
 
 The local `data.db` fallback resumes from where it was at cutover (it will be
 stale by the gap, but functional). Anything written to the central store during
