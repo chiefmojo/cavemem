@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export function readJson<T>(path: string, fallback: T): T {
@@ -10,9 +10,23 @@ export function readJson<T>(path: string, fallback: T): T {
   }
 }
 
+/**
+ * Write an installer config file owner-only. These configs can carry a remote
+ * bearer token (e.g. an `Authorization` header), so the file must be 0o600 and
+ * any directory we create for it 0o700. The chmod happens *after* the write
+ * because writeFileSync's mode option only applies at file creation — writing
+ * over a pre-existing world-readable file (older installer, umask slip) would
+ * otherwise keep its loose mode, while chmod-after-write tightens it on every
+ * re-install.
+ */
+export function writeFileSecure(path: string, contents: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, contents, 'utf8');
+  chmodSync(path, 0o600);
+}
+
 export function writeJson(path: string, data: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  writeFileSecure(path, `${JSON.stringify(data, null, 2)}\n`);
 }
 
 /**
