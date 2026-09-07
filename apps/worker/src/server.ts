@@ -117,8 +117,9 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
   // Prior-session priming for remote clients (WP #222): the opencode bridge
   // fetches its system-prompt hints here instead of reading the empty
   // client-local store. Ended sessions only, and session-scope summaries
-  // preferred (any-scope fallback) — both are the bridge's local-path
-  // guarantees; scan caps and exclusion semantics live in buildPriorContext.
+  // preferred, matching the bridge's local path; the any-scope fallback is
+  // new — a rollup-less ended session primes rather than yielding nothing.
+  // Scan caps and exclusion semantics live in buildPriorContext.
   // 500s use the same { error } envelope as the /api/hooks 4xx responses;
   // there is no shared error middleware to inherit.
   app.get('/api/context', (c) => {
