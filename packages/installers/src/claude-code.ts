@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readJson, shellQuote, writeJson } from './fs-utils.js';
@@ -96,6 +96,10 @@ export const claudeCode: Installer = {
     if (preservedNonCavemem && existsSync(settingsPath)) {
       const backup = `${settingsPath}.pre-cavemem-${Date.now()}`;
       copyFileSync(settingsPath, backup);
+      // The backup mirrors the user's full settings file, and copyFileSync
+      // honors the process umask — so it lands world-readable on typical
+      // setups. Tighten it explicitly to match the #233 owner-only policy.
+      chmodSync(backup, 0o600);
       messages.push(`backed up existing hooks to ${backup}`);
     }
 

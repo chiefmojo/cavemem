@@ -202,6 +202,31 @@ describe('claude-code installer', () => {
     expect(messages.some((m) => m.includes('backed up existing hooks'))).toBe(true);
   });
 
+  it('writes the pre-cavemem settings backup owner-only (#233)', async () => {
+    // Pre-existing USER hooks trigger the preserve-and-backup path.
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(
+      settingsPath(),
+      JSON.stringify({
+        hooks: {
+          SessionStart: [{ hooks: [{ type: 'command', command: 'echo pre-existing' }] }],
+        },
+      }),
+    );
+
+    await claudeCode.install(ctx);
+    const backups = readdirSync(join(home, '.claude')).filter((f) =>
+      f.startsWith('settings.json.pre-cavemem-'),
+    );
+    expect(backups.length).toBe(1);
+    // copyFileSync honors the process umask, so the backup must be tightened
+    // explicitly to match the #233 owner-only policy.
+    if (process.platform !== 'win32') {
+      const backupPath = join(home, '.claude', backups[0] ?? '');
+      expect(statSync(backupPath).mode & 0o777).toBe(0o600);
+    }
+  });
+
   it('does not write a backup on a fresh install with no prior hooks', async () => {
     const messages = await claudeCode.install(ctx);
     const backups = readdirSync(join(home, '.claude')).filter((f) =>
