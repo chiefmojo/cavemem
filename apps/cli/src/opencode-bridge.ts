@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, existsSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expand } from '@cavemem/compress';
@@ -80,13 +81,84 @@ function resolveCavememCli(): string {
 // `node <cli>`). Route .js entrypoints through a real node runtime. Beware
 // process.execPath: inside an IDE-embedded runtime (e.g. opencode's compiled
 // Bun binary) it is the IDE executable, not node — spawning it would launch
-// the IDE recursively. Use it only when it is node; otherwise resolve `node`
-// from PATH (guaranteed present wherever this CLI was npm-installed).
-export function hookSpawnCommand(cliPath: string): { command: string; args: string[] } {
+// the IDE recursively. Use it only when it is node.
+interface ResolveNodeBinaryOptions {
+  execPath?: string;
+  env?: NodeJS.ProcessEnv;
+  homeDir?: string;
+  platform?: NodeJS.Platform;
+}
+
+export function isNodeExec(p: string): boolean {
+  return /(^|[/\\])node(\.exe)?$/i.test(p);
+}
+
+function nodeFromOpencodeConfig(env: NodeJS.ProcessEnv, homeDir: string): string | null {
+  try {
+    const xdg = env.XDG_CONFIG_HOME;
+    const cfgPath = xdg
+      ? join(xdg, 'opencode', 'opencode.json')
+      : join(homeDir, '.config', 'opencode', 'opencode.json');
+    const raw = readFileSync(cfgPath, 'utf8');
+    const parsed = JSON.parse(raw) as { mcp?: { cavemem?: { type?: string; command?: unknown } } };
+    const entry = parsed.mcp?.cavemem;
+    if (!entry || entry.type !== 'local' || !Array.isArray(entry.command)) return null;
+    const cmd = entry.command[0];
+    if (typeof cmd !== 'string' || !isNodeExec(cmd)) return null;
+    return cmd;
+  } catch {
+    return null;
+  }
+}
+
+function findNodeOnPath(envPath: string | undefined, platform: NodeJS.Platform): string | null {
+  if (!envPath) return null;
+  const delim = platform === 'win32' ? ';' : ':';
+  const candidates = platform === 'win32' ? ['node.exe', 'node'] : ['node'];
+  for (const rawDir of envPath.split(delim)) {
+    const dir = rawDir.trim().replace(/^"(.*)"$/, '$1');
+    if (!dir) continue;
+    for (const name of candidates) {
+      const full = join(dir, name);
+      try {
+        if (statSync(full).isFile()) return full;
+      } catch {
+        /* keep searching */
+      }
+    }
+  }
+  return null;
+}
+
+// Resolution chain: (1) process.execPath if it is node; (2) the absolute node
+// binary the installer wrote into opencode.json; (3) a PATH scan; (4) null.
+// No Node runtime is bundled inside OpenCode, and the absolute path recorded
+// by `cavemem install --ide opencode` is more reliable than a PATH scan for
+// desktop-launched OpenCode (whose PATH may not include node). When nothing
+// resolves, hookSpawnCommand returns null so the bridge can disable capture
+// with a visible warning instead of silently dropping every hook.
+export function resolveNodeBinary(options: ResolveNodeBinaryOptions = {}): string | null {
+  const execPath = options.execPath ?? process.execPath ?? '';
+  const env = options.env ?? process.env;
+  const homeDir = options.homeDir ?? homedir();
+  const platform = options.platform ?? process.platform;
+
+  if (isNodeExec(execPath)) return execPath;
+
+  const fromConfig = nodeFromOpencodeConfig(env, homeDir);
+  if (fromConfig && existsSync(fromConfig)) return fromConfig;
+
+  return findNodeOnPath(env.PATH ?? env.Path, platform);
+}
+
+// Pure: routes .js entrypoints through the resolved node runtime, returns null
+// when a runtime is required but absent. Non-.js (bin shim) passthrough.
+export function hookSpawnCommand(
+  cliPath: string,
+  nodeBin: string | null,
+): { command: string; args: string[] } | null {
   if (cliPath.endsWith('.js')) {
-    const exec = process.execPath || '';
-    const isNode = /(^|[/\\])node(\.exe)?$/.test(exec);
-    return { command: isNode ? exec : 'node', args: [cliPath] };
+    return nodeBin ? { command: nodeBin, args: [cliPath] } : null;
   }
   return { command: cliPath, args: [] };
 }
@@ -116,6 +188,28 @@ function log(msg: string): void {
 export default async function cavememBridge({ directory }: PluginInput): Promise<Hooks> {
   const CAVEMEM = resolveCavememCli();
 
+  const NODE_UNAVAILABLE_MSG =
+    "Cavemem memory capture is disabled: no usable Node.js runtime was found, so new sessions will not be saved. Install Node.js 20+ and make sure it is on OpenCode's PATH (or rerun `cavemem install --ide opencode`), then restart OpenCode.";
+
+  let launchCommand: { command: string; args: string[] } | null = hookSpawnCommand(
+    CAVEMEM,
+    resolveNodeBinary(),
+  );
+  let captureDisabled = launchCommand === null;
+
+  function disableCapture(reason: string): void {
+    if (captureDisabled) return;
+    captureDisabled = true;
+    launchCommand = null;
+    log(`capture disabled: ${reason}`);
+    console.error(`[cavemem] ${NODE_UNAVAILABLE_MSG}`);
+  }
+
+  if (captureDisabled) {
+    log('capture disabled at init: no usable Node.js runtime');
+    console.error(`[cavemem] ${NODE_UNAVAILABLE_MSG}`);
+  }
+
   // Track which sessions we have already started so we don't duplicate.
   const activeSessions = new Set<string>();
   // Track which sessions already received retrieved context.
@@ -143,19 +237,21 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
     // subprocess (compression, SQLite insert, worker auto-spawn probe). Never
     // await the child's exit here — that would block every hook-triggering
     // event on a full `cavemem hook run` round-trip.
+    if (captureDisabled || !launchCommand) return;
     try {
-      const { command, args } = hookSpawnCommand(CAVEMEM);
+      const { command, args } = launchCommand;
       const child = spawn(command, [...args, 'hook', 'run', name, '--ide', 'opencode'], {
         stdio: ['pipe', 'ignore', 'ignore'],
         detached: true,
       });
-      child.on('error', (err) => log(`hook ${name} spawn failed: ${(err as Error).message}`));
+      child.on('error', (err) =>
+        disableCapture(`hook ${name} spawn failed: ${(err as Error).message}`),
+      );
       child.stdin.on('error', () => {});
       child.stdin.end(JSON.stringify(data));
       child.unref();
     } catch (err) {
-      const msg = (err as Error)?.message || String(err);
-      log(`hook ${name} failed: ${msg.slice(0, 200)}`);
+      disableCapture(`hook ${name} failed: ${(err as Error)?.message || String(err)}`);
     }
   }
 
@@ -364,6 +460,9 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
 
     'experimental.chat.system.transform': async (input, output) => {
       try {
+        if (captureDisabled && !output.system.includes(NODE_UNAVAILABLE_MSG)) {
+          output.system.push(NODE_UNAVAILABLE_MSG);
+        }
         const sid = input?.sessionID;
         if (!sid) return;
         output.system.push(
