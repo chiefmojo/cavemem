@@ -138,6 +138,22 @@ describe('worker HTTP', () => {
     });
   });
 
+  it('context: route is endedOnly — an in-flight turn summary is never hinted', async () => {
+    // Same cwd, same summary shape as a real mid-session turn: if the route
+    // dropped `endedOnly: true`, the builder would leak this into priming.
+    await seedContextSession('ctx-inflight', '/proj', {
+      ended: false,
+      summary: { content: 'inflight turn note', scope: 'turn' },
+    });
+    await seedContextSession('ctx-ended', '/proj', { summary: { content: 'ended session note' } });
+
+    const res = await apiReq('/api/context?cwd=/proj');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      hints: [{ sessionId: 'ctx-ended', content: 'ended session note', compressed: false }],
+    });
+  });
+
   it('context: empty store yields an empty hints array', async () => {
     const res = await apiReq('/api/context?cwd=/proj');
     expect(res.status).toBe(200);
