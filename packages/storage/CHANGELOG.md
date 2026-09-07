@@ -1,5 +1,29 @@
 # @cavemem/storage
 
+## 0.4.0
+
+### Patch Changes
+
+- 117f1cf: fix(hooks,storage): session-start recency window is per-project again (WP #209)
+
+  `session-start` fetched the 20 most recent sessions **machine-wide** and
+  then filtered by `cwd` in JS, so 20+ sessions from any other project or IDE
+  evicted the current project from the window and the hook silently injected
+  nothing — the widened window that shipped for #39 only delays this for any
+  fixed N. The `cwd` filter is now pushed into SQL via
+  `Storage.listSessions(limit, { cwd })`, making the window per-project.
+  Additionally, the 3-hint cap previously ran **before** summary-less
+  candidates were dropped, so three bare sessions could crowd out an older
+  summarized one; summary-less candidates are now skipped before the cap.
+  The hint scan is additionally bounded to the 10 most-recent same-cwd
+  sessions, so injected context can no longer reach arbitrarily far back past
+  summary-less recent sessions.
+
+- efc0bcb: Fix silent loss of turn summaries caused by a stale OpenCode bridge plugin. OpenCode loads every file in `~/.config/opencode/plugins/`, so a hand-written bridge plugin (anything other than our `cavemem.js` symlink) runs alongside the bundled one and — being older — drops `turn_summary`, silently disabling turn summaries for OpenCode. `cavemem install` now detects these foreign bridges in the plugins dir and warns (never deletes: non-interactive CLI); the Stop hook logs a `dropped: missing-summary` JSON line to stderr when `logLevel` is `debug` so the gap is diagnosable; and `cavemem doctor` / `cavemem status` print per-IDE turn-summary coverage (`ide summaries/sessions`), highlighting IDEs that record sessions but never summaries.
+- 9cda05f: Fix WP #222: OpenCode remote-mode priming fetches prior-session context from the worker (`GET /api/context`) instead of the empty client-local store. Adds the shared `buildPriorContext` builder (also now backing `sessionStart`); the bridge error log moved to `os.tmpdir()` so it works on Windows. PR #7 review fixes: remote priming prefers session-scope summaries (any-scope fallback, matching bridge-local selection), and `listSummaries` breaks same-ms ts ties newest-inserted-first.
+- Updated dependencies [cd52b4b]
+  - @cavemem/config@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
@@ -26,8 +50,8 @@
   AUTOINCREMENT values with no cross-device coordination — machine A's id=42
   and machine B's id=42 are routinely different observations — so the new
   `Storage.importObservation` treats the exported id as a preference, not an
-  identity: an exact (session_id, ts, content) duplicate anywhere in the
-  table is skipped; a free id is used as-is; an id occupied by a _different_
+  identity: an exact (session*id, ts, content) duplicate anywhere in the
+  table is skipped; a free id is used as-is; an id occupied by a \_different*
   observation gets a fresh AUTOINCREMENT id and is counted as "reassigned".
   Nothing is ever overwritten, and re-running the same import is a no-op even
   after a previous run reassigned ids. The summary line reports

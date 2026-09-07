@@ -1,5 +1,18 @@
 # @cavemem/mcp-server
 
+## 0.4.0
+
+### Minor Changes
+
+- cd52b4b: Remote mode: one central worker owns the store. `settings.remote.url` switches a machine to POST hooks to `/api/hooks/:event` and use MCP over streamable HTTP at `/mcp`. Worker gains `workerHost` and `workerAllowedHosts`. Installers write URL-based MCP entries in remote mode. The worker requires auth on every route except `/healthz`: `/api/*` and `/mcp` stay bearer-only, and viewer HTML (`/`, `/sessions/:id`) authenticates via a one-time handshake that trades a single-use nonce (minted via bearer-protected `POST /api/viewer-session`) for an `HttpOnly`/`SameSite=Strict` session cookie — a plaintext-memory viewer is never reachable unauthenticated once `workerHost` binds off loopback, and the durable bearer token never appears in a URL, browser history, or a spawned opener's process arguments. Spool replay is bounded by a whole-batch wall-clock budget of `2 × remote.timeoutMs`, so a slow-but-responsive server cannot stretch a hook across ten individually-legal replays; the remainder drains on the next successful hook.
+
+### Patch Changes
+
+- Updated dependencies [cd52b4b]
+  - @cavemem/config@0.4.0
+  - @cavemem/core@0.4.0
+  - @cavemem/embedding@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes

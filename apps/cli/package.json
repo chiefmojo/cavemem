@@ -1,6 +1,6 @@
 {
-  "name": "cavemem",
-  "version": "0.3.0",
+  "name": "@chiefmojo/cavemem",
+  "version": "0.4.0",
   "license": "MIT",
   "description": "Cross-agent persistent memory with compressed storage. Plug-and-play memory for Claude Code, Gemini CLI, OpenCode, Codex, Cursor, GitHub Copilot, Augment Code, Antigravity, and IBM Bob.",
   "keywords": [
@@ -19,14 +19,14 @@
     "compression",
     "llm"
   ],
-  "author": "Julius Brussee",
-  "homepage": "https://github.com/JuliusBrussee/cavemem",
+  "author": "Erick Wipprecht <chiefmojo@chiefmojo.com>",
+  "homepage": "https://github.com/chiefmojo/cavemem",
   "repository": {
     "type": "git",
-    "url": "https://github.com/JuliusBrussee/cavemem.git"
+    "url": "https://github.com/chiefmojo/cavemem.git"
   },
   "bugs": {
-    "url": "https://github.com/JuliusBrussee/cavemem/issues"
+    "url": "https://github.com/chiefmojo/cavemem/issues"
   },
   "engines": {
     "node": ">=20.0.0"

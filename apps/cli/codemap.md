@@ -1,12 +1,12 @@
 # apps/cli/
 
-The published npm package `cavemem` — the user-facing binary. It is the only workspace package that npm users install; everything else is bundled into it at build time.
+The published npm package `@chiefmojo/cavemem` — the user-facing binary. It is the only workspace package that npm users install; everything else is bundled into it at build time.
 
 ## Responsibility
 
 Owns three distinct surfaces that all ship in one package:
 
-1. **The `cavemem` CLI** (`bin: ./dist/index.js`, package name `"cavemem"`): a commander-based command tree for installing/uninstalling IDE integrations, settings management (`config`), health checks (`doctor`, `status`), memory access (`search`, `compress`/`expand`, `export`/`import`, `reindex`), daemon lifecycle (`start`/`stop`/`restart`/`viewer`, `worker …`), and the internal `hook run` entrypoint that IDE shell stubs invoke. In **remote mode** (`settings.remote.url` set) the same binary acts as a thin client: `search`/`doctor`/`status`/`install` talk to the central server, while daemon/lifecycle/data commands (`worker`, `start`/`stop`/`restart`/`viewer`, `export`/`import`, `mcp`, `reindex`) refuse — there is no local store.
+1. **The `cavemem` CLI** (`bin: ./dist/index.js`, package name `"@chiefmojo/cavemem"`): a commander-based command tree for installing/uninstalling IDE integrations, settings management (`config`), health checks (`doctor`, `status`), memory access (`search`, `compress`/`expand`, `export`/`import`, `reindex`), daemon lifecycle (`start`/`stop`/`restart`/`viewer`, `worker …`), and the internal `hook run` entrypoint that IDE shell stubs invoke. In **remote mode** (`settings.remote.url` set) the same binary acts as a thin client: `search`/`doctor`/`status`/`install` talk to the central server, while daemon/lifecycle/data commands (`worker`, `start`/`stop`/`restart`/`viewer`, `export`/`import`, `mcp`, `reindex`) refuse — there is no local store.
 2. **The OpenCode plugin bridge** (`dist/opencodeBridge.js`, second tsup entry from `src/opencode-bridge.ts`) — dynamically loaded by OpenCode to translate its event stream into cavemem hook calls.
 3. **The publish surface** (`scripts/prepack.mjs`, `scripts/pack-release.mjs`): stages and packages the tarball for both the changeset publish path and the legacy `publish:release` path.
 
@@ -28,12 +28,12 @@ Sub-packages are *not* runtime dependencies: `apps/mcp-server`, `apps/worker`, a
 - Daemon path: `cavemem start` → pidfile `dataDir/worker.pid` → detached `node <cli> worker run` → `@cavemem/worker#start()` (viewer HTTP + embedding backfill loop); state surfaces back via `dataDir/worker.state.json` in `cavemem status`.
 - Remote mode: with `settings.remote.url` set, `search` GETs `<remote.url>/api/search` (bearer `remote.token`), `doctor`/`status` probe the server (`/healthz` + authenticated `/api/state`), and local-only commands exit 1 with "run `cavemem <cmd>` on the server" — the daemon, store, and viewer live on the server machine (`apps/worker`); `hook run` dispatches to `<remote.url>/api/hooks/<name>` inside `@cavemem/hooks#runHook`, so `hook.ts` needs no mode check.
 - opencode-bridge.ts — plugin; writes fire-and-forget via CLI hooks; priming reads the local store, or /api/context on the worker in remote mode (WP #222)
-- Publish path: `changeset publish` → `prepublishOnly`/`prepack` (`scripts/prepack.mjs` stages README/LICENSE/hooks-scripts) → packed tarball. Fallback: `pnpm publish:release` → `scripts/pack-release.mjs` builds `release/` for `npm publish ./release`.
+- Publish path: `pnpm release` (changeset publish) → `prepublishOnly`/`prepack` (`scripts/prepack.mjs` stages README/LICENSE/hooks-scripts) → packed tarball. Fallback: `pnpm publish:release` → `scripts/pack-release.mjs` builds `release/` for `npm publish ./release`.
 
 ## Integration
 
 - **Downward only** (`apps/*` → `packages/*`): `@cavemem/config` (all settings access), `@cavemem/compress` (compress/expand), `@cavemem/storage` (all DB I/O), `@cavemem/core` (`MemoryStore`), `@cavemem/embedding` (`createEmbedder`), `@cavemem/hooks` (`runHook`, hook names/types), `@cavemem/installers` (installer registry, `checkWindowsSh`), plus sibling apps `@cavemem/worker` and `@cavemem/mcp-server` imported dynamically and bundled in.
 - **Consumed by**: IDEs (bin + `hooks-scripts/` stubs), OpenCode (`opencodeBridge.js`), and repo-level verification (`scripts/e2e-publish.sh` drives the packed binary end to end).
-- **Release machinery**: version/changesets owned by repo-level `.github/workflows/release.yml`; this app's `package.json#scripts` (`prepublishOnly`, `stage-publish`, `pack:release`, `publish:release`) implement the two publish flows. Changing anything here requires re-running `scripts/e2e-publish.sh` and `scripts/e2e-pack-release.sh` (per CLAUDE.md).
+- **Release machinery**: releases are cut manually from `main` — `pnpm release` (changeset publish) after `npm login`, no CI by choice; version/changesets are owned at repo level. This app's `package.json#scripts` (`prepublishOnly`, `stage-publish`, `pack:release`, `publish:release`) implement the two publish flows. Changing anything here requires re-running `scripts/e2e-publish.sh` and `scripts/e2e-pack-release.sh` (per CLAUDE.md).
 
 Child maps: [src/codemap.md](src/codemap.md) · [scripts/codemap.md](scripts/codemap.md)

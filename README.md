@@ -6,7 +6,7 @@
 
 **why agent forget when agent can remember**
 
-[![npm](https://img.shields.io/npm/v/cavemem?style=flat&color=yellow)](https://www.npmjs.com/package/cavemem) [![Stars](https://img.shields.io/github/stars/chiefmojo/cavemem?style=flat&color=yellow)](https://github.com/chiefmojo/cavemem/stargazers) [![Last Commit](https://img.shields.io/github/last-commit/chiefmojo/cavemem?style=flat)](https://github.com/chiefmojo/cavemem/commits/main) [![License](https://img.shields.io/github/license/chiefmojo/cavemem?style=flat)](LICENSE)
+[![npm](https://img.shields.io/npm/v/@chiefmojo/cavemem?style=flat&color=yellow)](https://www.npmjs.com/package/@chiefmojo/cavemem) [![Stars](https://img.shields.io/github/stars/chiefmojo/cavemem?style=flat&color=yellow)](https://github.com/chiefmojo/cavemem/stargazers) [![Last Commit](https://img.shields.io/github/last-commit/chiefmojo/cavemem?style=flat)](https://github.com/chiefmojo/cavemem/commits/main) [![License](https://img.shields.io/github/license/chiefmojo/cavemem?style=flat)](LICENSE)
 
 [Install](#install) • [How it works](#how-it-works) • [CLI](#cli) • [MCP](#mcp) • [Settings](#settings)
 
@@ -39,7 +39,7 @@ Cross-agent persistent memory for coding assistants. In the default local config
 ## Install
 
 ```sh
-npm install -g cavemem
+npm install -g @chiefmojo/cavemem
 cavemem install                    # Claude Code
 cavemem install --ide cursor       # cursor | gemini-cli | opencode | codex | copilot | augment | antigravity | bob
 cavemem status                     # see wiring + embedding backfill
