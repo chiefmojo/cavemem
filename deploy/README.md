@@ -3,10 +3,8 @@
 Moves cavemem from per-machine local mode to one central worker on the LAN that
 owns the SQLite store for every coding agent on every dev box.
 
-- Design: `docs/superpowers/specs/2026-09-02-shared-memory-server-design.md`
-  and `companion-ops/specs/2026-09-02-cavemem-shared-memory-server.md`.
-- Tracks **WP #194** (`Memory` sub-project). Currently *Developed* — the code
-  is on `main`; this runbook is the "ship it" step.
+- Design and rationale: kept with the operator's internal ops notes, not in this repo.
+- Remote mode landed in PR #1; this runbook is the "ship it" step.
 - Remote-mode behaviour and settings reference: `docs/remote.md`.
 - Building and updating a standalone (pre-cutover) local install: `docs/local-install.md`.
 

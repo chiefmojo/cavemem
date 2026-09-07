@@ -34,7 +34,7 @@ export const SettingsSchema = z
       .array(z.string().regex(/^[^\s:/]+:\d{1,5}$/, 'expected host:port'))
       .default([])
       .describe(
-        'Extra host:port values accepted in the Host/Origin headers, e.g. ["neuromancer:37777"]. ' +
+        'Extra host:port values accepted in the Host/Origin headers, e.g. ["mem.example.lan:37777"]. ' +
           'Loopback is always accepted. Empty means loopback only, even when workerHost is 0.0.0.0.',
       ),
     remote: z
@@ -45,7 +45,7 @@ export const SettingsSchema = z
           .regex(/^https?:\/\//, 'expected http(s) URL')
           .optional()
           .describe(
-            'Base URL of a central cavemem worker, e.g. http://neuromancer:37777. Setting it ' +
+            'Base URL of a central cavemem worker, e.g. http://mem.example.lan:37777. Setting it ' +
               'switches this machine into remote mode: hooks POST to the server and installers ' +
               'write URL-based MCP entries.',
           ),

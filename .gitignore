@@ -24,3 +24,9 @@ apps/cli/release/
 
 .opencode/
 .remember/
+
+# Internal design artifacts — kept locally, not published
+docs/superpowers/
+
+# Generated slim-mode codemap cache (machine-specific paths + timestamps)
+.slim/
