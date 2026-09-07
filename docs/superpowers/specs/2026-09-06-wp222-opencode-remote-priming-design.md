@@ -60,7 +60,7 @@ Writes stay fire-and-forget via the CLI hook commands. The once-per-session `que
 
 - SQL cwd-scoped fetch: `store.storage.listSessions(20, { cwd })`.
 - Skip `excludeSessionId`; scan cap `MAX_CANDIDATES_SCANNED = 10`; first summary of any scope per session (`listSummaries(s.id)[0]`); cap 3 hints.
-- `endedOnly?: boolean` — when true, candidates with `ended_at === null` are skipped. The bridge passes `true` to keep its current ended-sessions-only guarantee (without it, a concurrent same-cwd window's in-flight turn summary — `listSummaries` is `ORDER BY ts DESC` across all scopes — could be injected into the other window's priming). `sessionStart` omits the flag and keeps its exact semantics.
+- `endedOnly?: boolean` — when true, candidates with `ended_at === null` are skipped. The bridge passes `true` to keep its current ended-sessions-only guarantee (without it, a concurrent same-cwd window's in-flight turn summary — `listSummaries` is `ORDER BY ts DESC` across all scopes — could be injected into the other window's priming). `sessionStart` omits the flag and keeps its exact semantics. **An `endedOnly` skip consumes a `MAX_CANDIDATES_SCANNED` slot** (same accounting as a summary-less candidate): a transparent skip would let the scan walk past unboundedly many in-flight sessions and reach arbitrarily far back, defeating the cap's guarantee. `excludeSessionId` remains transparent (pre-scan check, matching current `sessionStart` behavior).
 - Returns raw rows `{ sessionId, content, compressed }` (boolean), no formatting.
 
 `sessionStart` (`packages/hooks/src/handlers/session-start.ts`) refactors onto the builder (omitting `endedOnly`) and re-renders its current output (`## Prior-session context\n` + hints joined `\n---\n`, raw stored content). **Existing session-start tests must pass unmodified** — that is the behavior-preservation proof.
@@ -88,7 +88,7 @@ Exported through `packages/hooks` package exports (worker already depends on `@c
 - Worker (`apps/worker/test/server.test.ts`, `buildApp` + `apiReq` conventions):
   - 401 without token; 400 without `cwd`; cwd-scoped hints with exclusion and scan-cap semantics; empty store → `{ hints: [] }`.
 - Hooks (`packages/hooks` tests):
-  - Direct unit tests for `buildPriorContext` (cwd scoping, exclusion, scan cap, first-summary-any-scope selection, 3-hint cap, `compressed` normalization, `endedOnly` skipping in-flight sessions and default-off for `sessionStart` parity).
+  - Direct unit tests for `buildPriorContext` (cwd scoping, exclusion, scan cap — with `endedOnly` skips counting against the cap — first-summary-any-scope selection, 3-hint cap, `compressed` normalization, `endedOnly` skipping in-flight sessions and default-off for `sessionStart` parity).
   - Existing `session-start` tests green **unmodified**.
 - Bridge (new `apps/cli/test/opencode-bridge.test.ts`):
   - Remote path: temp settings home with `remote.url`/`remote.token`, stubbed `fetch` (`vi.stubGlobal`) asserting URL, auth header, and the injected system string.
