@@ -82,7 +82,8 @@ describe('buildPriorContext', () => {
         session_id: id,
         scope: summary.scope ?? 'session',
         content: summary.content,
-        compressed: summary.compressed ?? 0,
+        compressed: summary.compressed === 1,
+        intensity: null,
       });
     }
   }
@@ -120,7 +121,8 @@ describe('buildPriorContext', () => {
         session_id: `live-${i}`,
         scope: 'turn',
         content: `in-flight ${i}`,
-        compressed: 0,
+        compressed: false,
+        intensity: null,
       });
     }
 
@@ -143,8 +145,8 @@ describe('buildPriorContext', () => {
     const hints = buildPriorContext(store, { cwd: '/proj' });
     expect(hints.map((h) => h.sessionId)).toEqual(['s4', 's3', 's2']);
     expect(hints[0]).toEqual({ sessionId: 's4', content: 'h4', compressed: false });
-    expect(hints[1].compressed).toBe(true);
-    expect(hints[2].compressed).toBe(false);
+    expect(hints[1]?.compressed).toBe(true);
+    expect(hints[2]?.compressed).toBe(false);
   });
 
   it('returns [] when nothing matches', () => {
@@ -302,7 +304,8 @@ async function seedContextSession(
       session_id: id,
       scope: opts.summary.scope ?? 'session',
       content: opts.summary.content,
-      compressed: opts.summary.compressed ?? 0,
+      compressed: opts.summary.compressed === 1,
+      intensity: null,
     });
   }
   if (opts.ended !== false) store.endSession(id);
@@ -523,7 +526,8 @@ describe('opencode-bridge prior-context priming', () => {
       session_id: 'local-1',
       scope: 'session',
       content: 'local summary text',
-      compressed: 0,
+      compressed: false,
+      intensity: null,
     });
     seed.close();
 
