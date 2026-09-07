@@ -364,10 +364,16 @@ import { buildPriorContext, type HookInput, type HookName, runHook } from '@cave
   app.get('/api/context', (c) => {
     const cwd = c.req.query('cwd');
     if (!cwd) return c.json({ error: 'cwd is required' }, 400);
-    const excludeSessionId = c.req.query('exclude') || undefined;
+    const exclude = c.req.query('exclude');
     try {
       return c.json({
-        hints: buildPriorContext(store, { cwd, excludeSessionId, endedOnly: true }),
+        hints: buildPriorContext(store, {
+          cwd,
+          // Conditional spread: exactOptionalPropertyTypes rejects an explicit
+          // `undefined`; absent/empty `exclude` must stay absent.
+          ...(exclude ? { excludeSessionId: exclude } : {}),
+          endedOnly: true,
+        }),
       });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
