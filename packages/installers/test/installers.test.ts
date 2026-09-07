@@ -865,10 +865,22 @@ describe('codexMcpMode / codexWslWarning (#231)', () => {
     mkdirSync(join(home, '.codex'), { recursive: true });
     writeFileSync(
       join(home, '.codex', 'config.toml'),
-      '[desktop]\nintegratedTerminalShell = "wsl"\n',
+      '[desktop]\nrunCodexInWindowsSubsystemForLinux = true\n',
     );
     const messages = await codex.install(ctx);
     expect(messages.some((m) => m.includes('WSL'))).toBe(true);
+  });
+
+  it('does not warn when only the integrated terminal shell is WSL', async () => {
+    // integratedTerminalShell = "wsl" is a desktop-app terminal preference, not
+    // a signal that Codex itself runs under WSL — it must not trigger a warning.
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    writeFileSync(
+      join(home, '.codex', 'config.toml'),
+      '[desktop]\nintegratedTerminalShell = "wsl"\n',
+    );
+    const messages = await codex.install(ctx);
+    expect(messages.some((m) => m.includes('WSL'))).toBe(false);
   });
 
   it('does not warn without WSL signals', async () => {
@@ -878,12 +890,22 @@ describe('codexMcpMode / codexWslWarning (#231)', () => {
     expect(messages.some((m) => m.includes('WSL'))).toBe(false);
   });
 
-  it('codexWslWarning is null without desktop WSL keys', () => {
+  it('codexWslWarning keys only on runCodexInWindowsSubsystemForLinux', () => {
     expect(codexWslWarning({ model: 'gpt-5' })).toBeNull();
     expect(codexWslWarning({ desktop: { integratedTerminalShell: 'cmd' } })).toBeNull();
+    // integratedTerminalShell = "wsl" alone is not a WSL-run signal.
+    expect(codexWslWarning({ desktop: { integratedTerminalShell: 'wsl' } })).toBeNull();
     expect(codexWslWarning({ desktop: { runCodexInWindowsSubsystemForLinux: true } })).toContain(
       'WSL',
     );
+    expect(
+      codexWslWarning({
+        desktop: {
+          integratedTerminalShell: 'wsl',
+          runCodexInWindowsSubsystemForLinux: false,
+        },
+      }),
+    ).toBeNull();
   });
 });
 

@@ -19,20 +19,25 @@ export function codexMcpMode(ideConfigDir: string): 'remote' | 'stdio' | 'absent
 }
 
 /**
- * Warns when a Codex config indicates it runs under WSL (WP #231 issue #5). A
- * Windows-installed cavemem writes `node.exe` + CLI paths into
+ * Warns when a Codex config indicates Codex runs under WSL (WP #231 issue #5).
+ * A Windows-installed cavemem writes `node.exe` + CLI paths into
  * `%USERPROFILE%\.codex`, which WSL Codex never reads — it uses `~/.codex`
  * inside WSL and has no Windows binary on its PATH.
+ *
+ * Only `runCodexInWindowsSubsystemForLinux` is checked. The `[desktop]` table is
+ * opaque passthrough to the codex-cli (it never reads either key), and both keys
+ * are written by the closed-source desktop app — so this is a best-effort proxy.
+ * `integratedTerminalShell` is deliberately NOT checked: `"wsl"` there only means
+ * the desktop app's integrated terminal opens a WSL shell, a false positive on
+ * native-Windows installs where Codex itself runs on Windows.
  */
 export function codexWslWarning(cfg: Record<string, unknown>): string | null {
   const desktop = cfg.desktop as Record<string, unknown> | undefined;
-  const usesWsl =
-    desktop?.integratedTerminalShell === 'wsl' ||
-    desktop?.runCodexInWindowsSubsystemForLinux === true;
-  if (!usesWsl) return null;
+  const runsInWsl = desktop?.runCodexInWindowsSubsystemForLinux === true;
+  if (!runsInWsl) return null;
   return [
-    'This Codex config indicates it runs under WSL (integratedTerminalShell /',
-    'runCodexInWindowsSubsystemForLinux). This install writes Windows paths',
+    'This Codex config indicates Codex runs under WSL',
+    '(runCodexInWindowsSubsystemForLinux). This install writes Windows paths',
     '(node.exe + the cavemem CLI) into %USERPROFILE%\\.codex, which WSL Codex does',
     'not read — it uses ~/.codex inside WSL and has no Windows binary on its PATH.',
     '',
