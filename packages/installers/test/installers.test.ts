@@ -17,7 +17,7 @@ import { antigravity } from '../src/antigravity.js';
 import { augment } from '../src/augment.js';
 import { bob } from '../src/bob.js';
 import { claudeCode } from '../src/claude-code.js';
-import { codex } from '../src/codex.js';
+import { codex, codexMcpMode, codexWslWarning } from '../src/codex.js';
 import { copilot } from '../src/copilot.js';
 import { cursor } from '../src/cursor.js';
 import { deepMerge, shellQuote } from '../src/fs-utils.js';
@@ -52,6 +52,11 @@ beforeEach(() => {
     cliPath: join(fakeDist, 'index.js'),
     nodeBin: '/fake/bin/node',
     dataDir: join(home, '.cavemem'),
+    // Pin a non-win32 platform so the default context is deterministic
+    // regardless of the host OS — codex emits `commandWindows` only on win32
+    // (via `ctx.platform ?? process.platform`), so win32-specific assertions
+    // must opt in with an explicit `platform: 'win32'` ctx instead.
+    platform: 'linux',
   };
 });
 
@@ -327,9 +332,10 @@ describe('claude-code installer', () => {
     // into garbage and the hook into MODULE_NOT_FOUND.
     const winCtx: InstallContext = {
       ideConfigDir: home,
-      cliPath: 'C:\\Users\\User\\AppData\\Roaming\\npm\\node_modules\\cavemem\\dist\\index.js',
-      nodeBin: 'C:\\nodejs\\node.exe',
+      cliPath: 'C:\\Users\\Some User\\AppData\\Roaming\\npm\\node_modules\\cavemem\\dist\\index.js',
+      nodeBin: 'C:\\Program Files\\nodejs\\node.exe',
       dataDir: join(home, '.cavemem'),
+      platform: 'win32',
     };
     await claudeCode.install(winCtx);
     const settings = JSON.parse(readFileSync(settingsPath(), 'utf8')) as {
@@ -358,15 +364,20 @@ describe('codex installer', () => {
     expect(existsSync(hooksJson())).toBe(true);
 
     const parsed = parseToml(readFileSync(cfg(), 'utf8')) as {
-      features: { codex_hooks: boolean };
+      features: { hooks: boolean };
       mcp_servers: { cavemem: { command: string; args: string[] } };
     };
-    expect(parsed.features.codex_hooks).toBe(true);
+    expect(parsed.features.hooks).toBe(true);
     expect(parsed.mcp_servers.cavemem.command).toBe(ctx.nodeBin);
     expect(parsed.mcp_servers.cavemem.args).toEqual([ctx.cliPath, 'mcp']);
 
     const hooks = JSON.parse(readFileSync(hooksJson(), 'utf8')) as {
-      hooks: Record<string, Array<{ hooks: Array<{ command: string; statusMessage?: string }> }>>;
+      hooks: Record<
+        string,
+        Array<{
+          hooks: Array<{ command: string; commandWindows?: string; statusMessage?: string }>;
+        }>
+      >;
     };
     expect(Object.keys(hooks.hooks).sort()).toEqual(
       ['PostToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit'].sort(),
@@ -376,6 +387,9 @@ describe('codex installer', () => {
     expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.command).toBe(
       `${shellQuote(ctx.nodeBin)} ${shellQuote(ctx.cliPath)} hook run session-start --ide codex`,
     );
+    // `commandWindows` is only emitted on win32 (native Codex); the default
+    // non-Windows install omits it rather than writing a dead Unix-path copy.
+    expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.commandWindows).toBeUndefined();
     expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.statusMessage).toBe(
       'Loading cavemem context',
     );
@@ -391,12 +405,16 @@ describe('codex installer', () => {
       cliPath: 'C:\\Users\\Some User\\AppData\\Roaming\\npm\\node_modules\\cavemem\\dist\\index.js',
       nodeBin: 'C:\\Program Files\\nodejs\\node.exe',
       dataDir: join(home, '.cavemem'),
+      platform: 'win32',
     };
     await codex.install(winCtx);
     const hooks = JSON.parse(readFileSync(hooksJson(), 'utf8')) as {
-      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+      hooks: Record<string, Array<{ hooks: Array<{ command: string; commandWindows?: string }> }>>;
     };
     expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.command).toBe(
+      `"${winCtx.nodeBin}" "${winCtx.cliPath}" hook run session-start --ide codex`,
+    );
+    expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.commandWindows).toBe(
       `"${winCtx.nodeBin}" "${winCtx.cliPath}" hook run session-start --ide codex`,
     );
     // MCP entry stays a structured {command, args} shape — no shell quoting.
@@ -430,12 +448,12 @@ describe('codex installer', () => {
 
     const parsed = parseToml(readFileSync(cfg(), 'utf8')) as {
       model: string;
-      features: { codex_hooks: boolean; web_search: boolean };
+      features: { hooks: boolean; web_search: boolean };
       mcp_servers: Record<string, { command: string; args?: string[] }>;
     };
     expect(parsed.model).toBe('gpt-5');
     expect(parsed.features.web_search).toBe(true);
-    expect(parsed.features.codex_hooks).toBe(true);
+    expect(parsed.features.hooks).toBe(true);
     expect(parsed.mcp_servers.other?.command).toBe('/other/bin');
     expect(parsed.mcp_servers.cavemem?.command).toBe(ctx.nodeBin);
 
@@ -446,6 +464,19 @@ describe('codex installer', () => {
     for (const name of ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop']) {
       expect(hooks.hooks[name]?.length).toBe(1);
     }
+  });
+
+  it('removes a stale codex_hooks key when writing the canonical hooks key', async () => {
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    writeFileSync(cfg(), ['[features]', 'codex_hooks = true', ''].join('\n'));
+
+    await codex.install(ctx);
+
+    const parsed = parseToml(readFileSync(cfg(), 'utf8')) as {
+      features: Record<string, unknown>;
+    };
+    expect(parsed.features.hooks).toBe(true);
+    expect(parsed.features.codex_hooks).toBeUndefined();
   });
 
   it('uninstall removes only cavemem entries', async () => {
@@ -463,11 +494,11 @@ describe('codex installer', () => {
     await codex.uninstall(ctx);
 
     const parsed = parseToml(readFileSync(cfg(), 'utf8')) as {
-      features: { codex_hooks: boolean };
+      features: { hooks: boolean };
       mcp_servers?: Record<string, unknown>;
     };
     // Feature stays on; mcp_servers.cavemem gone.
-    expect(parsed.features.codex_hooks).toBe(true);
+    expect(parsed.features.hooks).toBe(true);
     expect(parsed.mcp_servers).toBeUndefined();
 
     const hooks = JSON.parse(readFileSync(hooksJson(), 'utf8')) as {
@@ -476,6 +507,18 @@ describe('codex installer', () => {
     expect(hooks.hooks.SessionStart?.length).toBe(1);
     expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.command).toBe('echo other');
     expect(hooks.hooks.PostToolUse).toBeUndefined();
+  });
+
+  it('uninstall removes a legacy codex_hooks key', async () => {
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    writeFileSync(cfg(), ['[features]', 'codex_hooks = true', ''].join('\n'));
+
+    await codex.uninstall(ctx);
+
+    const parsed = parseToml(readFileSync(cfg(), 'utf8')) as {
+      features?: Record<string, unknown>;
+    };
+    expect(parsed.features?.codex_hooks).toBeUndefined();
   });
 });
 
@@ -760,7 +803,7 @@ describe('remote mode MCP entries', () => {
     expect(after.mcpServers?.cavemem).toBeUndefined();
   });
 
-  it('codex writes url + bearer_token_env_var and prints the export hint', async () => {
+  it('codex writes url + static http_headers Authorization in remote mode', async () => {
     mkdirSync(join(home, '.codex'), { recursive: true });
     const msgs = await codex.install({ ...ctx, remote });
     const cfg = parseToml(readFileSync(join(home, '.codex', 'config.toml'), 'utf8')) as {
@@ -768,9 +811,9 @@ describe('remote mode MCP entries', () => {
     };
     expect(cfg.mcp_servers.cavemem).toEqual({
       url: 'http://neuromancer:37777/mcp',
-      bearer_token_env_var: 'CAVEMEM_REMOTE_TOKEN',
+      http_headers: { Authorization: 'Bearer tok123' },
     });
-    expect(msgs.join('\n')).toContain('export CAVEMEM_REMOTE_TOKEN=');
+    // The bearer lives in config, never in a returned message.
     expect(msgs.join('\n')).not.toContain(remote.token);
   });
 
@@ -806,6 +849,63 @@ describe('remote mode MCP entries', () => {
     const json = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'));
     expect(json.mcpServers.cavemem.command).toBe('/fake/bin/node');
     expect(json.mcpServers.cavemem.url).toBeUndefined();
+  });
+});
+
+describe('codexMcpMode / codexWslWarning (#231)', () => {
+  it('reports absent, stdio, and remote mcp_servers.cavemem correctly', async () => {
+    expect(codexMcpMode(home)).toBe('absent');
+    await codex.install(ctx);
+    expect(codexMcpMode(home)).toBe('stdio');
+    await codex.install({ ...ctx, remote: { url: 'http://neuromancer:37777', token: 't' } });
+    expect(codexMcpMode(home)).toBe('remote');
+  });
+
+  it('warns when the Codex config indicates WSL use', async () => {
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    writeFileSync(
+      join(home, '.codex', 'config.toml'),
+      '[desktop]\nrunCodexInWindowsSubsystemForLinux = true\n',
+    );
+    const messages = await codex.install(ctx);
+    expect(messages.some((m) => m.includes('WSL'))).toBe(true);
+  });
+
+  it('does not warn when only the integrated terminal shell is WSL', async () => {
+    // integratedTerminalShell = "wsl" is a desktop-app terminal preference, not
+    // a signal that Codex itself runs under WSL — it must not trigger a warning.
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    writeFileSync(
+      join(home, '.codex', 'config.toml'),
+      '[desktop]\nintegratedTerminalShell = "wsl"\n',
+    );
+    const messages = await codex.install(ctx);
+    expect(messages.some((m) => m.includes('WSL'))).toBe(false);
+  });
+
+  it('does not warn without WSL signals', async () => {
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    writeFileSync(join(home, '.codex', 'config.toml'), 'model = "gpt-5"\n');
+    const messages = await codex.install(ctx);
+    expect(messages.some((m) => m.includes('WSL'))).toBe(false);
+  });
+
+  it('codexWslWarning keys only on runCodexInWindowsSubsystemForLinux', () => {
+    expect(codexWslWarning({ model: 'gpt-5' })).toBeNull();
+    expect(codexWslWarning({ desktop: { integratedTerminalShell: 'cmd' } })).toBeNull();
+    // integratedTerminalShell = "wsl" alone is not a WSL-run signal.
+    expect(codexWslWarning({ desktop: { integratedTerminalShell: 'wsl' } })).toBeNull();
+    expect(codexWslWarning({ desktop: { runCodexInWindowsSubsystemForLinux: true } })).toContain(
+      'WSL',
+    );
+    expect(
+      codexWslWarning({
+        desktop: {
+          integratedTerminalShell: 'wsl',
+          runCodexInWindowsSubsystemForLinux: false,
+        },
+      }),
+    ).toBeNull();
   });
 });
 
