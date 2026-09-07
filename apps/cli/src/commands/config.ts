@@ -50,6 +50,11 @@ function deleteDotted(obj: Record<string, unknown>, path: string): void {
   if (last) delete (cur as Record<string, unknown>)[last];
 }
 
+function isKnownSettingPath(key: string): boolean {
+  const docs = settingsDocs();
+  return docs.some((d) => d.path === key) || docs.some((d) => d.path.startsWith(`${key}.`));
+}
+
 function coerce(raw: string): unknown {
   if (raw === 'true') return true;
   if (raw === 'false') return false;
@@ -146,8 +151,16 @@ export function registerConfigCommand(program: Command): void {
     .action((key: string) => {
       const settings = loadSettings();
       if (getDotted(settings, key) === undefined) {
-        process.stderr.write(`${kleur.red('unknown key:')} ${key}\n`);
-        process.exitCode = 1;
+        // Absent keys: unknown paths error, but a known schema path that is
+        // simply not set is a no-op success — keeps unset idempotent for
+        // runbooks/scripts (e.g. remote.token absent when the client
+        // authenticates via CAVEMEM_REMOTE_TOKEN).
+        if (!isKnownSettingPath(key)) {
+          process.stderr.write(`${kleur.red('unknown key:')} ${key}\n`);
+          process.exitCode = 1;
+          return;
+        }
+        process.stdout.write(`${kleur.green('✓')} already unset: ${key}\n`);
         return;
       }
       const next = JSON.parse(JSON.stringify(settings)) as Record<string, unknown>;

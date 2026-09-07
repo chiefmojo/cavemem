@@ -70,6 +70,21 @@ describe('config unset', () => {
     expect(loadSettings().dataDir).toBe(resolve(dir));
   });
 
+  it('no-op-succeeds on a known schema key that is already absent', async () => {
+    // Rollback-runbook case: client authenticated via CAVEMEM_REMOTE_TOKEN
+    // env, so remote.token was never written to settings.json. unset must not
+    // treat that as an error and abort a `&&`-chained runbook.
+    writeSettings({ remote: { url: 'http://neuromancer:37777', timeoutMs: 1500 } });
+    const out = await runCommand(['config', 'unset', 'remote.token']);
+
+    expect(out).toContain('already unset: remote.token');
+    expect(process.exitCode).toBeUndefined();
+
+    // Untouched settings stay exactly as they were.
+    const settings = reread();
+    expect(settings.remote.url).toBe('http://neuromancer:37777');
+  });
+
   it('errors on an unknown key with exit code 1', async () => {
     writeSettings();
     const err: string[] = [];
