@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
-import { readJson, shellQuote, writeJson } from './fs-utils.js';
+import { readJson, shellQuote, writeFileSecure, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
 /**
@@ -100,8 +100,9 @@ function readToml(path: string): Record<string, unknown> {
 }
 
 function writeToml(path: string, data: Record<string, unknown>): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${stringifyToml(data)}\n`, 'utf8');
+  // config.toml carries the remote bearer in `http_headers` (WP #231 issue #4),
+  // so it goes through the same owner-only write as the JSON configs.
+  writeFileSecure(path, `${stringifyToml(data)}\n`);
 }
 
 export const codex: Installer = {

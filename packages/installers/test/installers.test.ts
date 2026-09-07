@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -20,7 +21,7 @@ import { claudeCode } from '../src/claude-code.js';
 import { codex, codexMcpMode, codexWslWarning } from '../src/codex.js';
 import { copilot } from '../src/copilot.js';
 import { cursor } from '../src/cursor.js';
-import { deepMerge, shellQuote } from '../src/fs-utils.js';
+import { deepMerge, shellQuote, writeJson } from '../src/fs-utils.js';
 import { findForeignBridges, openCode } from '../src/opencode.js';
 import { getInstaller, installers } from '../src/registry.js';
 import type { InstallContext } from '../src/types.js';
@@ -199,6 +200,31 @@ describe('claude-code installer', () => {
     );
     expect(backups.length).toBe(1);
     expect(messages.some((m) => m.includes('backed up existing hooks'))).toBe(true);
+  });
+
+  it('writes the pre-cavemem settings backup owner-only (#233)', async () => {
+    // Pre-existing USER hooks trigger the preserve-and-backup path.
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(
+      settingsPath(),
+      JSON.stringify({
+        hooks: {
+          SessionStart: [{ hooks: [{ type: 'command', command: 'echo pre-existing' }] }],
+        },
+      }),
+    );
+
+    await claudeCode.install(ctx);
+    const backups = readdirSync(join(home, '.claude')).filter((f) =>
+      f.startsWith('settings.json.pre-cavemem-'),
+    );
+    expect(backups.length).toBe(1);
+    // copyFileSync honors the process umask, so the backup must be tightened
+    // explicitly to match the #233 owner-only policy.
+    if (process.platform !== 'win32') {
+      const backupPath = join(home, '.claude', backups[0] ?? '');
+      expect(statSync(backupPath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('does not write a backup on a fresh install with no prior hooks', async () => {
@@ -850,6 +876,85 @@ describe('remote mode MCP entries', () => {
     expect(json.mcpServers.cavemem.command).toBe('/fake/bin/node');
     expect(json.mcpServers.cavemem.url).toBeUndefined();
   });
+});
+
+// #233: installer configs can carry the remote bearer token, so every file
+// these installers write must be owner-only (0o600) and every directory they
+// create 0o700. chmod is a no-op on win32 (mode bits never round-trip through
+// stat), so mode assertions are POSIX-gated like the augment exec-bit check.
+describe('secure config file perms (#233)', () => {
+  const remote = { url: 'http://neuromancer:37777', token: 'tok123' };
+  const mode = (p: string) => statSync(p).mode & 0o777;
+
+  it('writeJson writes 0o600 and creates missing parent dirs at 0o700', () => {
+    // Target a nested path the fixture never pre-creates: both the dirs and
+    // the file must come out owner-only.
+    const target = join(home, 'fresh', 'nested', 'config.json');
+    writeJson(target, { a: 1 });
+    if (process.platform !== 'win32') {
+      expect(mode(target)).toBe(0o600);
+      expect(mode(join(home, 'fresh'))).toBe(0o700);
+      expect(mode(join(home, 'fresh', 'nested'))).toBe(0o700);
+    }
+    // 2-space indent + trailing newline are unchanged by the perm work.
+    expect(readFileSync(target, 'utf8')).toBe('{\n  "a": 1\n}\n');
+  });
+
+  it('codex remote install: config.toml is 0o600 in a 0o700 .codex dir', async () => {
+    // Do NOT pre-create ~/.codex — the installer must create it at 0o700.
+    await codex.install({ ...ctx, remote });
+    const cfgPath = join(home, '.codex', 'config.toml');
+    const parsed = parseToml(readFileSync(cfgPath, 'utf8')) as {
+      mcp_servers: { cavemem: { http_headers?: { Authorization?: string } } };
+    };
+    expect(parsed.mcp_servers.cavemem.http_headers?.Authorization).toBe(`Bearer ${remote.token}`);
+    if (process.platform !== 'win32') {
+      expect(mode(cfgPath)).toBe(0o600);
+      expect(mode(join(home, '.codex'))).toBe(0o700);
+    }
+  });
+
+  it('opencode remote install: opencode.json is 0o600', async () => {
+    const originalXdg = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = join(home, '.config');
+    try {
+      await openCode.install({ ...ctx, remote });
+      const path = join(home, '.config', 'opencode', 'opencode.json');
+      const json = JSON.parse(readFileSync(path, 'utf8')) as {
+        mcp: Record<string, { url?: string }>;
+      };
+      expect(json.mcp.cavemem?.url).toBe('http://neuromancer:37777/mcp');
+      if (process.platform !== 'win32') {
+        expect(mode(path)).toBe(0o600);
+      }
+    } finally {
+      if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = originalXdg;
+    }
+  });
+
+  it('claude-code remote install: settings.json and ~/.claude.json are 0o600', async () => {
+    await claudeCode.install({ ...ctx, remote });
+    if (process.platform !== 'win32') {
+      expect(mode(join(home, '.claude', 'settings.json'))).toBe(0o600);
+      expect(mode(join(home, '.claude.json'))).toBe(0o600);
+    }
+  });
+
+  it.runIf(process.platform !== 'win32')(
+    're-install tightens a world-readable config back to 0o600',
+    async () => {
+      const mcpJson = join(home, '.claude.json');
+      await claudeCode.install({ ...ctx, remote });
+      // Simulate a pre-existing world-readable file (older installer, umask
+      // slip): writeFileSync's create-time mode cannot fix this, so only a
+      // chmod-after-write gets it back to 0o600.
+      chmodSync(mcpJson, 0o644);
+      expect(mode(mcpJson)).toBe(0o644);
+      await claudeCode.install({ ...ctx, remote });
+      expect(mode(mcpJson)).toBe(0o600);
+    },
+  );
 });
 
 describe('codexMcpMode / codexWslWarning (#231)', () => {
