@@ -39,8 +39,15 @@ for them is a separate problem, per the spec.
 
 ## 0. Pre-flight (on the build box — `wintermute`, from `main`)
 
-The npm registry `cavemem` is upstream's frozen release and has **no remote
-mode** — the server and clients must run a build from this fork's `main`.
+The server and clients install the published package from the registry. The
+primary install path everywhere is:
+
+```bash
+npm i -g @chiefmojo/cavemem@<version>
+```
+
+Releases are cut manually from `main` — `pnpm release` after `npm login`, no
+CI by choice. Before releasing, verify the build:
 
 ```bash
 cd ~/dev/cavemem
@@ -54,15 +61,7 @@ bash scripts/e2e-publish.sh      # publish surface: bin shim, hook contract, MCP
 Both e2e scripts are required to pass before shipping the publish surface
 (CLAUDE.md). Do not proceed on a red run.
 
-Build the install artifact:
-
-```bash
-pnpm --filter cavemem stage-publish
-( cd apps/cli && npm pack )       # writes apps/cli/cavemem-<version>.tgz
-```
-
-Keep the `.tgz` — the same file installs on the server and (optionally) refreshes
-clients.
+Break-glass only: for boxes that cannot reach npm, the GitHub Release carries a packed `.tgz`; build it with `pnpm --filter @chiefmojo/cavemem stage-publish && ( cd apps/cli && npm pack )`.
 
 ---
 
@@ -83,15 +82,14 @@ npm config set prefix ~/.local
 env -i PATH=/usr/local/bin:/usr/bin:/bin node --version   # confirm >= 20
 ```
 
-### 1b. Install the build
+### 1b. Install the release
 
 ```bash
-scp apps/cli/cavemem-<version>.tgz agentops@neuromancer:~
-ssh agentops@neuromancer 'npm install -g ~/cavemem-<version>.tgz && cavemem --version'
+ssh agentops@neuromancer 'npm install -g @chiefmojo/cavemem@<version> && cavemem --version'
 ```
 
-Record the artifact's provenance now — the §5 comment needs it: `cavemem
---version` from the server, and the `main` commit the tgz was built from
+Record the release's provenance now — the §5 comment needs it: `cavemem
+--version` from the server, and the `main` commit the release was cut from
 (`git rev-parse --short main` on `wintermute`).
 
 ### 1c. Migrate the live store (run on `wintermute` as `chiefmojo`)

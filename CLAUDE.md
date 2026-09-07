@@ -14,7 +14,7 @@ Commands, merge gates, coding style, and PR conventions live in `AGENTS.md` — 
 
 ## Repository status
 
-Standalone repo — `chiefmojo/cavemem` (`origin`) is the only home. Detached from the GitHub fork network 2026-09-06, `upstream` remote removed: `JuliusBrussee/cavemem` was a dead end (frozen Aug 2026; its compressed-memory core was slated to move into `caveman`), and the fork link kept making `gh` default ambiguous repo ops to that parent.
+Standalone repo — `chiefmojo/cavemem` (`origin`) is the only home, now **public** at `github.com/chiefmojo/cavemem`. The published npm package is **`@chiefmojo/cavemem`** (from 0.4.0); the unscoped `cavemem` name on npm is **not ours** (`juliusbrussee`, frozen at 0.2.1) — never publish there. Detached from the GitHub fork network 2026-09-06, `upstream` remote removed: `JuliusBrussee/cavemem` was a dead end (frozen Aug 2026; its compressed-memory core was slated to move into `caveman`), and the fork link kept making `gh` default ambiguous repo ops to that parent.
 
 Develop here directly. There is **no upstream contribution flow** — no PRs back to `JuliusBrussee`, so no PR-content scrub hooks, no contribution rubric, no "what would upstream want" lens. Different from `hermes-agent-contrib` / `MemOS-contrib`, which do track upstream.
 
@@ -91,7 +91,7 @@ Commands and the four merge gates are in `AGENTS.md`. Two rules that shape desig
 
 Unit tests cover handlers, storage, and protocol contracts in isolation. They cannot catch issues that only show up in a globally-installed binary: bin-shim symlink resolution, ESM chunk shebangs, `prepublishOnly` staging, native `better-sqlite3` resolution, dynamic-import bundling. Those failure modes have bitten this repo before — they are now guarded by a dedicated script.
 
-- `bash scripts/e2e-publish.sh` — covers the **changeset publish** path (CI default). Builds, packs (mirroring what `changeset publish` ships), installs into an isolated `.e2e/` prefix with an isolated `$HOME`, drives every Claude Code hook event with a realistic payload, exercises FTS search and the MCP server, then uninstalls. Self-cleans on success. Required to pass in CI before `changeset publish` runs.
+- `bash scripts/e2e-publish.sh` — covers the **changeset publish** path (what `pnpm release` ships). Builds, packs (mirroring what `changeset publish` ships), installs into an isolated `.e2e/` prefix with an isolated `$HOME`, drives every Claude Code hook event with a realistic payload, exercises FTS search and the MCP server, then uninstalls. Self-cleans on success. Required to pass before `pnpm release` runs.
 - `bash scripts/e2e-pack-release.sh` — covers the **`pnpm publish:release`** path (legacy bespoke flow that uses `apps/cli/scripts/pack-release.mjs` to write `apps/cli/release/`). Run this if you change `pack-release.mjs` or the `dependencies` block of `apps/cli/package.json`.
 - `bash scripts/e2e-remote.sh` — covers remote mode: server + client on one box through the packed artifact, all hook events, spool/drain, MCP over HTTP. Required alongside `e2e-publish.sh`.
 - The 15 numbered checks in `e2e-publish.sh` must stay green. If you change anything in `apps/cli/`, `packages/installers/`, the hook handler stdout/stderr contract, or the publish surface, re-run it locally before opening a PR.
@@ -115,9 +115,9 @@ Unit tests cover handlers, storage, and protocol contracts in isolation. They ca
 
 ## Release policy
 
-- Versioning via changesets. Releases are normally cut by GitHub Actions (`.github/workflows/release.yml`) on merge to `main` when a release changeset exists. Local publishing from a laptop is permitted as a fallback when CI publishing is unavailable (e.g. missing/expired `NPM_TOKEN`); use `pnpm --filter cavemem publish:release` from `main` after `npm login`.
+- Versioning via changesets. Releases are cut **manually from `main`** — `pnpm release` (changeset publish) after `npm login` — and publish the npm package `@chiefmojo/cavemem`. There is **no CI by choice**: the repo has no `.github/` and no CI release workflow (deferred due to cost). The legacy bespoke flow (`pnpm --filter @chiefmojo/cavemem publish:release`) remains as a fallback.
 - Version/dependency bumps go through a PR — never a direct-push version-bump merge.
-- PRs require passing CI and one review.
+- PRs require the four merge gates (`pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`) green locally and one review.
 
 ## Code style
 

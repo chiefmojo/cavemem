@@ -36,10 +36,10 @@ unset CAVEMEM_HOME XDG_DATA_HOME
 
 echo "==> 1. build + pack"
 pnpm build >/dev/null
-pnpm --filter cavemem stage-publish >/dev/null
+pnpm --filter @chiefmojo/cavemem stage-publish >/dev/null
 VERSION=$(node -e "console.log(require('$REPO/apps/cli/package.json').version)")
 ( cd "$REPO/apps/cli" && npm pack --pack-destination "$PACK" >/dev/null )
-npm install --prefix "$PREFIX" --global "$PACK/cavemem-$VERSION.tgz" >/dev/null
+npm install --prefix "$PREFIX" --global "$PACK/chiefmojo-cavemem-$VERSION.tgz" >/dev/null
 BIN="$PREFIX/bin/cavemem"
 
 PORT=$(node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")

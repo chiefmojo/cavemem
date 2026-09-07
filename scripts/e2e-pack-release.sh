@@ -27,7 +27,7 @@ cleanup
 mkdir -p "$PACK" "$PREFIX" "$HOME_DIR"
 
 echo "==> 1. pack:release (build + pack-release.mjs)"
-pnpm --filter cavemem pack:release >/dev/null
+pnpm --filter @chiefmojo/cavemem pack:release >/dev/null
 
 REL="$REPO/apps/cli/release"
 test -f "$REL/package.json" || { echo "release dir missing package.json"; exit 1; }
@@ -38,7 +38,7 @@ test -d "$REL/hooks-scripts" || { echo "release dir missing hooks-scripts"; exit
 echo "==> 2. npm pack the release dir (mirrors what publish:release uploads)"
 VERSION=$(node -e "console.log(require('$REPO/apps/cli/package.json').version)")
 ( cd "$REL" && npm pack --pack-destination "$PACK" >/dev/null )
-TGZ="$PACK/cavemem-$VERSION.tgz"
+TGZ="$PACK/chiefmojo-cavemem-$VERSION.tgz"
 test -f "$TGZ" || { echo "tarball missing at $TGZ"; ls "$PACK"; exit 1; }
 
 echo "==> 3. install -g into isolated prefix"

@@ -41,12 +41,12 @@ echo "==> 1. build everything"
 pnpm build >/dev/null
 
 echo "==> 2. stage publish files (README, LICENSE, hooks-scripts)"
-pnpm --filter cavemem stage-publish
+pnpm --filter @chiefmojo/cavemem stage-publish
 
 echo "==> 3. npm pack from apps/cli"
 VERSION=$(node -e "console.log(require('$REPO/apps/cli/package.json').version)")
 ( cd "$REPO/apps/cli" && npm pack --pack-destination "$PACK" >/dev/null )
-TGZ="$PACK/cavemem-$VERSION.tgz"
+TGZ="$PACK/chiefmojo-cavemem-$VERSION.tgz"
 test -f "$TGZ" || { echo "tarball missing at $TGZ"; ls "$PACK"; exit 1; }
 
 echo "==> 4. inspect tarball contents"
