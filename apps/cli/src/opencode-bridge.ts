@@ -84,6 +84,14 @@ function truncate(value: unknown, max = 2000): string {
   return str.length > max ? `${str.slice(0, max)}…` : str;
 }
 
+// Error name only, never the message: remote-mode exception messages can
+// embed the authorization header value (e.g. undici's invalid-header
+// TypeError quotes the full `Bearer …` string) or raw settings content
+// (JSON.parse failures), and the remote token must never reach the log.
+function errorName(err: unknown): string {
+  return (err as { name?: string })?.name || 'Error';
+}
+
 const LOG_PATH = join(tmpdir(), 'cavemem-bridge-errors.log');
 
 function log(msg: string): void {
@@ -131,8 +139,7 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
       store = new MemoryStore({ dbPath, settings });
     }
   } catch (err) {
-    const msg = (err as Error)?.message || String(err);
-    log(`init degraded, priming disabled: ${msg.slice(0, 200)}`);
+    log(`init degraded, priming disabled: ${errorName(err)}`);
   }
 
   async function runHook(name: string, data: Record<string, unknown>): Promise<void> {
@@ -181,7 +188,12 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
           headers: { authorization: `Bearer ${remote.token ?? ''}` },
           signal: AbortSignal.timeout(remote.timeoutMs),
         });
-        if (!res.ok) throw new Error(`context fetch failed: ${res.status}`);
+        if (!res.ok) {
+          // Status is a bare number — safe to log. Never log the exception
+          // message or body here: they can embed the authorization value.
+          log(`context fetch failed: ${res.status}`);
+          return '';
+        }
         const body = (await res.json()) as {
           hints?: Array<{ sessionId: string; content: string; compressed: boolean }>;
         };
@@ -230,8 +242,16 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
       log(`injected ${context.length} chars`);
       return context;
     } catch (err) {
-      const msg = (err as Error)?.message || String(err);
-      log(`retrieval error: ${msg}`);
+      if (remote) {
+        // Remote mode: name only — see errorName() for why the message is
+        // unsafe (fetch/header/parse errors can quote the authorization
+        // value; timeout failures surface as AbortError/TimeoutError names).
+        log(`retrieval error: ${errorName(err)}`);
+      } else {
+        // Local store errors cannot contain the remote token — keep detail.
+        const msg = (err as Error)?.message || String(err);
+        log(`retrieval error: ${msg}`);
+      }
       return '';
     }
   }

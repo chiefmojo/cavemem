@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultSettings } from '@cavemem/config';
@@ -107,6 +107,35 @@ describe('opencode-bridge prior-context priming', () => {
     );
 
     expect(system.join('\n')).not.toContain('Prior context');
+  });
+
+  it('never logs the remote token when fetch throws an invalid-header error', async () => {
+    const logPath = join(tmpdir(), 'cavemem-bridge-errors.log');
+    let logBefore = '';
+    try {
+      logBefore = readFileSync(logPath, 'utf8');
+    } catch {
+      // No log file yet.
+    }
+    // undici's header validation throws a TypeError whose message quotes the
+    // full authorization value — if that message reaches the bridge log, the
+    // token is disclosed.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError(`Headers.append: "Bearer tok" is an invalid header value.`);
+      }),
+    );
+
+    const system = await prime(
+      await loadBridge({ remote: { url: 'http://worker:37777', token: 'tok', timeoutMs: 200 } }),
+    );
+
+    expect(system.join('\n')).not.toContain('Prior context');
+    const appended = readFileSync(logPath, 'utf8').slice(logBefore.length);
+    // Fixed error category only — never the exception message.
+    expect(appended).toContain('retrieval error: TypeError');
+    expect(appended).not.toContain('tok');
   });
 
   it('degrades to no priming on invalid remote.url without throwing at init', async () => {
