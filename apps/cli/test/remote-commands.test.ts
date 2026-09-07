@@ -123,7 +123,9 @@ describe('remote CLI commands', () => {
     expect(out).toContain('server:   ok');
     expect(out).toContain('auth:     ok');
     expect(out).toContain(
-      process.platform === 'win32' ? 'CAVEMEM_REMOTE_TOKEN present' : 'CAVEMEM_REMOTE_TOKEN not set',
+      process.platform === 'win32'
+        ? 'CAVEMEM_REMOTE_TOKEN present'
+        : 'CAVEMEM_REMOTE_TOKEN not set',
     );
     expect(out).toContain('cavemem config unset remote.url');
     expect(out).toContain('cavemem stop');

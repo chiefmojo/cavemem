@@ -53,6 +53,11 @@ beforeEach(() => {
     cliPath: join(fakeDist, 'index.js'),
     nodeBin: '/fake/bin/node',
     dataDir: join(home, '.cavemem'),
+    // Pin a non-win32 platform so the default context is deterministic
+    // regardless of the host OS — codex emits `commandWindows` only on win32
+    // (via `ctx.platform ?? process.platform`), so win32-specific assertions
+    // must opt in with an explicit `platform: 'win32'` ctx instead.
+    platform: 'linux',
   };
 });
 
