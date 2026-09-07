@@ -201,7 +201,7 @@ export function buildPriorContext(
   const hints: PriorContextHint[] = [];
   let scanned = 0;
   for (const s of recent) {
-    if (opts.excludeSessionId && s.id === opts.excludeSessionId) continue;
+    if (s.id === opts.excludeSessionId) continue;
     if (scanned >= MAX_CANDIDATES_SCANNED) break;
     scanned++;
     if (opts.endedOnly && s.ended_at === null) continue;
