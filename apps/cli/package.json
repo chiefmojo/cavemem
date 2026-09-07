@@ -1,6 +1,6 @@
 {
   "name": "@chiefmojo/cavemem",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "license": "MIT",
   "description": "Cross-agent persistent memory with compressed storage. Plug-and-play memory for Claude Code, Gemini CLI, OpenCode, Codex, Cursor, GitHub Copilot, Augment Code, Antigravity, and IBM Bob.",
   "keywords": [

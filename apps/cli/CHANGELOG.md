@@ -1,5 +1,12 @@
 # cavemem
 
+## 0.4.2
+
+### Patch Changes
+
+- 2d0fef5: Expose a `close()` on the OpenCode bridge hooks so the local SQLite store can release its file handle; fixes the `opencode-bridge` test EPERM on Windows temp-dir cleanup (WP #232).
+- 930f4a6: Installer config files that can carry the remote bearer token (Claude Code `settings.json`/`~/.claude.json`, OpenCode `opencode.json`, Codex `config.toml`/`hooks.json`) are now written owner-only (0o600) into directories created at 0o700; a re-install also tightens a pre-existing world-readable config, and the Claude Code `.pre-cavemem-*` settings backup is chmod'd 0o600 (WP #233).
+
 ## 0.4.1
 
 ### Patch Changes
