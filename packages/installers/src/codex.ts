@@ -7,9 +7,24 @@ import type { InstallContext, Installer } from './types.js';
 
 export const CODEX_TOKEN_ENV = 'CAVEMEM_REMOTE_TOKEN';
 
+/**
+ * Remote-mode post-install hint for the bearer-token env var. Codex reads
+ * `bearer_token_env_var` from its own process environment at startup, so on
+ * Windows this must be set in the user environment (`setx` / System
+ * Properties) rather than a POSIX `export`. `platform` mirrors the injectable
+ * arg on `checkWindowsSh` so non-Windows CI can exercise the win32 branch.
+ */
+export function codexRemoteTokenHint(platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32') {
+    return `codex reads the bearer token from the environment — persist it in your user environment, then restart Codex:\n    setx ${CODEX_TOKEN_ENV} "<your-cavemem-remote-token>"\n  (setx applies to newly launched shells — open a new terminal / restart Codex after running it)`;
+  }
+  return `codex reads the bearer token from the environment — add to your shell profile:\n    export ${CODEX_TOKEN_ENV}=<your-cavemem-remote-token>`;
+}
+
 interface CodexHookCommand {
   type: 'command';
   command: string;
+  commandWindows?: string;
   statusMessage?: string;
 }
 
@@ -77,11 +92,13 @@ export const codex: Installer = {
     const cfgPath = configFile(ctx);
     const hooksPath = hooksFile(ctx);
 
-    // ---- config.toml: features.codex_hooks + mcp_servers.cavemem ----
+    // ---- config.toml: features.hooks + mcp_servers.cavemem ----
+    // `features.hooks` is the canonical key; `codex_hooks` is a deprecated
+    // alias that still works but emits a startup warning.
     const cfg = readToml(cfgPath);
 
     const features = (cfg.features as Record<string, unknown> | undefined) ?? {};
-    features.codex_hooks = true;
+    features.hooks = true;
     cfg.features = features;
 
     const mcpServers =
@@ -98,9 +115,7 @@ export const codex: Installer = {
     writeToml(cfgPath, cfg);
     messages.push(`wrote ${cfgPath}`);
     if (ctx.remote) {
-      messages.push(
-        `codex reads the bearer token from the environment — add to your shell profile:\n    export ${CODEX_TOKEN_ENV}=<your-cavemem-remote-token>`,
-      );
+      messages.push(codexRemoteTokenHint());
     }
 
     // ---- hooks.json: register cavemem entries; preserve user hooks ----
@@ -115,11 +130,18 @@ export const codex: Installer = {
     for (const [eventName, hookId, statusMessage] of HOOK_NAMES) {
       const existing = hookMap[eventName] ?? [];
       const others = existing.filter((g) => !isCavememHookGroup(g, hookId));
+      // Codex uses `command` with Unix semantics and `commandWindows` on
+      // native Windows; the base command string would otherwise be run with
+      // assumptions that break a Windows `node.exe` + `.js` path. The string
+      // is shellQuote'd to be safe under both cmd.exe and sh, so it serves
+      // both fields.
+      const command = `${nodeBin} ${cliPath} hook run ${hookId} --ide codex`;
       const group: CodexHookGroup = {
         hooks: [
           {
             type: 'command',
-            command: `${nodeBin} ${cliPath} hook run ${hookId} --ide codex`,
+            command,
+            commandWindows: command,
             ...(statusMessage ? { statusMessage } : {}),
           },
         ],
@@ -146,9 +168,9 @@ export const codex: Installer = {
         delete mcpServers.cavemem;
         if (Object.keys(mcpServers).length === 0) delete cfg.mcp_servers;
       }
-      // Leave [features] codex_hooks alone — turning it off would break any
-      // other tools that rely on it. The hooks.json cleanup below is enough
-      // to stop cavemem hooks from firing.
+      // Leave [features] hooks alone — turning it off would break any other
+      // tools that rely on it. The hooks.json cleanup below is enough to stop
+      // cavemem hooks from firing.
       writeToml(cfgPath, cfg);
       messages.push(`updated ${cfgPath}`);
     }

@@ -17,7 +17,7 @@ import { antigravity } from '../src/antigravity.js';
 import { augment } from '../src/augment.js';
 import { bob } from '../src/bob.js';
 import { claudeCode } from '../src/claude-code.js';
-import { codex } from '../src/codex.js';
+import { codex, codexRemoteTokenHint } from '../src/codex.js';
 import { copilot } from '../src/copilot.js';
 import { cursor } from '../src/cursor.js';
 import { deepMerge, shellQuote } from '../src/fs-utils.js';
@@ -358,10 +358,10 @@ describe('codex installer', () => {
     expect(existsSync(hooksJson())).toBe(true);
 
     const parsed = parseToml(readFileSync(cfg(), 'utf8')) as {
-      features: { codex_hooks: boolean };
+      features: { hooks: boolean };
       mcp_servers: { cavemem: { command: string; args: string[] } };
     };
-    expect(parsed.features.codex_hooks).toBe(true);
+    expect(parsed.features.hooks).toBe(true);
     expect(parsed.mcp_servers.cavemem.command).toBe(ctx.nodeBin);
     expect(parsed.mcp_servers.cavemem.args).toEqual([ctx.cliPath, 'mcp']);
 
@@ -394,9 +394,12 @@ describe('codex installer', () => {
     };
     await codex.install(winCtx);
     const hooks = JSON.parse(readFileSync(hooksJson(), 'utf8')) as {
-      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+      hooks: Record<string, Array<{ hooks: Array<{ command: string; commandWindows?: string }> }>>;
     };
     expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.command).toBe(
+      `"${winCtx.nodeBin}" "${winCtx.cliPath}" hook run session-start --ide codex`,
+    );
+    expect(hooks.hooks.SessionStart?.[0]?.hooks?.[0]?.commandWindows).toBe(
       `"${winCtx.nodeBin}" "${winCtx.cliPath}" hook run session-start --ide codex`,
     );
     // MCP entry stays a structured {command, args} shape — no shell quoting.
@@ -430,12 +433,12 @@ describe('codex installer', () => {
 
     const parsed = parseToml(readFileSync(cfg(), 'utf8')) as {
       model: string;
-      features: { codex_hooks: boolean; web_search: boolean };
+      features: { hooks: boolean; web_search: boolean };
       mcp_servers: Record<string, { command: string; args?: string[] }>;
     };
     expect(parsed.model).toBe('gpt-5');
     expect(parsed.features.web_search).toBe(true);
-    expect(parsed.features.codex_hooks).toBe(true);
+    expect(parsed.features.hooks).toBe(true);
     expect(parsed.mcp_servers.other?.command).toBe('/other/bin');
     expect(parsed.mcp_servers.cavemem?.command).toBe(ctx.nodeBin);
 
@@ -463,11 +466,11 @@ describe('codex installer', () => {
     await codex.uninstall(ctx);
 
     const parsed = parseToml(readFileSync(cfg(), 'utf8')) as {
-      features: { codex_hooks: boolean };
+      features: { hooks: boolean };
       mcp_servers?: Record<string, unknown>;
     };
     // Feature stays on; mcp_servers.cavemem gone.
-    expect(parsed.features.codex_hooks).toBe(true);
+    expect(parsed.features.hooks).toBe(true);
     expect(parsed.mcp_servers).toBeUndefined();
 
     const hooks = JSON.parse(readFileSync(hooksJson(), 'utf8')) as {
@@ -772,6 +775,13 @@ describe('remote mode MCP entries', () => {
     });
     expect(msgs.join('\n')).toContain('export CAVEMEM_REMOTE_TOKEN=');
     expect(msgs.join('\n')).not.toContain(remote.token);
+  });
+
+  it('codex remote-token hint is platform-aware (setx on Windows, export elsewhere)', () => {
+    expect(codexRemoteTokenHint('linux')).toContain('export CAVEMEM_REMOTE_TOKEN=');
+    expect(codexRemoteTokenHint('darwin')).toContain('export CAVEMEM_REMOTE_TOKEN=');
+    expect(codexRemoteTokenHint('win32')).toContain('setx CAVEMEM_REMOTE_TOKEN');
+    expect(codexRemoteTokenHint('win32')).not.toContain('export CAVEMEM_REMOTE_TOKEN');
   });
 
   it('opencode writes a remote MCP entry with headers', async () => {
