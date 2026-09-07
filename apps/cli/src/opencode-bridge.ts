@@ -1,10 +1,13 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expand } from '@cavemem/compress';
 import { loadSettings, resolveDataDir } from '@cavemem/config';
 import { MemoryStore } from '@cavemem/core';
+import type { RemoteTarget } from '@cavemem/hooks';
+import { checkedRemoteTarget } from './util/remote.js';
 
 /* ------------------------------------------------------------------ */
 // Minimal local types for the OpenCode plugin API (no runtime dependency
@@ -81,7 +84,7 @@ function truncate(value: unknown, max = 2000): string {
   return str.length > max ? `${str.slice(0, max)}…` : str;
 }
 
-const LOG_PATH = '/tmp/cavemem-bridge-errors.log';
+const LOG_PATH = join(tmpdir(), 'cavemem-bridge-errors.log');
 
 function log(msg: string): void {
   try {
@@ -109,17 +112,27 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
   // Track which message IDs are user messages (for prompt capture).
   const userMessageIds = new Set<string>();
 
-  // Load settings and open the store once for read-only context retrieval.
-  // The store is used only for prior-session priming; all writes go through
-  // the cavemem CLI hook commands so they follow the compression + redaction
-  // pipeline enforced by MemoryStore.
+  // Prior-session priming source. Remote mode: prime from the worker via
+  // /api/context — the client-local data.db is empty/stale here (WP #222),
+  // and opening it would also create a junk empty data.db on remote clients.
+  // Local mode: read the local store exactly as before. Both settings load
+  // and target resolution are guarded: checkedRemoteTarget throws on an
+  // invalid remote.url, and a throw here would take down every bridge hook —
+  // including the fire-and-forget writes — so we degrade to no priming at all.
   let store: MemoryStore | undefined;
+  let remote: RemoteTarget | undefined;
   try {
     const settings = loadSettings();
-    const dbPath = join(resolveDataDir(settings.dataDir), 'data.db');
-    store = new MemoryStore({ dbPath, settings });
-  } catch {
-    // If settings or DB are missing, prior-session context is simply skipped.
+    const target = checkedRemoteTarget(settings);
+    if (target) {
+      remote = target;
+    } else {
+      const dbPath = join(resolveDataDir(settings.dataDir), 'data.db');
+      store = new MemoryStore({ dbPath, settings });
+    }
+  } catch (err) {
+    const msg = (err as Error)?.message || String(err);
+    log(`init degraded, priming disabled: ${msg.slice(0, 200)}`);
   }
 
   async function runHook(name: string, data: Record<string, unknown>): Promise<void> {
@@ -159,9 +172,33 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
     if (queriedSessions.has(sessionID)) return '';
     queriedSessions.add(sessionID);
 
-    if (!store) return '';
-
     try {
+      if (remote) {
+        const u = new URL('/api/context', remote.url);
+        u.searchParams.set('cwd', directory);
+        u.searchParams.set('exclude', sessionID);
+        const res = await fetch(u, {
+          headers: { authorization: `Bearer ${remote.token ?? ''}` },
+          signal: AbortSignal.timeout(remote.timeoutMs),
+        });
+        if (!res.ok) throw new Error(`context fetch failed: ${res.status}`);
+        const body = (await res.json()) as {
+          hints?: Array<{ sessionId: string; content: string; compressed: boolean }>;
+        };
+        const hints = (body.hints ?? [])
+          .map((h) => (h.compressed ? expand(h.content) : h.content).trim())
+          .filter((t) => t.length > 0);
+
+        log(`retrieval for ${sessionID}: ${hints.length} hints found`);
+        if (hints.length === 0) return '';
+
+        const context = `Prior context (internal): ${hints.join(' | ')}`;
+        log(`injected ${context.length} chars`);
+        return context;
+      }
+
+      if (!store) return '';
+
       const sessions = store.storage.listSessions(50);
       // Scope to the current project directory — otherwise opening OpenCode
       // in project A can inject summaries from an unrelated project B
