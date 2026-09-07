@@ -52,8 +52,8 @@
   AUTOINCREMENT values with no cross-device coordination — machine A's id=42
   and machine B's id=42 are routinely different observations — so the new
   `Storage.importObservation` treats the exported id as a preference, not an
-  identity: an exact (session*id, ts, content) duplicate anywhere in the
-  table is skipped; a free id is used as-is; an id occupied by a \_different*
+  identity: an exact (session_id, ts, content) duplicate anywhere in the
+  table is skipped; a free id is used as-is; an id occupied by a _different_
   observation gets a fresh AUTOINCREMENT id and is counted as "reassigned".
   Nothing is ever overwritten, and re-running the same import is a no-op even
   after a previous run reassigned ids. The summary line reports
