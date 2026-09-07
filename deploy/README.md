@@ -208,25 +208,15 @@ curl -sS -H "Authorization: Bearer <token>" \
      ~/.opencode ~/.config/opencode ~/.codex ~/.claude* 2>/dev/null
    ```
    Move any non-canonical hit aside (`.bak-preremote`) and re-test.
-5. Codex only — codex reads the bearer from its environment
-   (`bearer_token_env_var`); inline `bearer_token` is rejected for
-   streamable-http transports. The variable must be visible to
-   **non-interactive** shells, because codex is frequently launched from a
-   wrapper or another process, not a login prompt. A plain
-   `export` near the end of `~/.bashrc` is **not** enough — the stock
-   `case $- in *i*) ;; *) return;; esac` guard near the top of `~/.bashrc`
-   returns before it. Put it in one of:
-   ```bash
-   # ~/.bashrc — ABOVE the non-interactive guard
-   export CAVEMEM_REMOTE_TOKEN=<token>
-
-   # or ~/.config/environment.d/cavemem.conf  (systemd --user + graphical session)
-   CAVEMEM_REMOTE_TOKEN=<token>
-   ```
-   Then start a fresh shell and confirm: `bash -lc 'echo ${CAVEMEM_REMOTE_TOKEN:+set}'`.
+5. Codex only — since 0.4.2, `cavemem install` writes the bearer directly into
+   `~/.codex/config.toml` (`http_headers` Authorization, matching Claude Code /
+   OpenCode), so no client-side `CAVEMEM_REMOTE_TOKEN` environment variable is
+   needed. Setups from 0.4.0/0.4.1 that exported one (in `~/.bashrc` above the
+   non-interactive guard, or `~/.config/environment.d/`) can re-run
+   `cavemem install --ide codex` and then remove the export.
 6. Verify again:
    ```bash
-   cavemem doctor          # codex: warning clears once the env var is set; spool: N queued
+   cavemem doctor          # codex: warning clears once the config is wired for remote; spool: N queued
    ```
 7. Leave local `~/.cavemem/data.db` in place as a fallback. Delete it only after
    the server has been validated for a few days.
