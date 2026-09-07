@@ -20,7 +20,7 @@ import { claudeCode } from '../src/claude-code.js';
 import { codex } from '../src/codex.js';
 import { copilot } from '../src/copilot.js';
 import { cursor } from '../src/cursor.js';
-import { deepMerge } from '../src/fs-utils.js';
+import { deepMerge, shellQuote } from '../src/fs-utils.js';
 import { findForeignBridges, openCode } from '../src/opencode.js';
 import { getInstaller, installers } from '../src/registry.js';
 import type { InstallContext } from '../src/types.js';
@@ -121,8 +121,10 @@ describe('claude-code installer', () => {
     expect(Object.keys(settings.hooks).sort()).toEqual(
       ['PostToolUse', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit'].sort(),
     );
+    // The installer shell-quotes nodeBin + cliPath; on win32 the temp cliPath
+    // contains backslashes, which shellQuote wraps in quotes (MSYS-bash strip).
     expect(settings.hooks.SessionStart?.[0]?.hooks?.[0]?.command).toBe(
-      `${ctx.nodeBin} ${ctx.cliPath} hook run session-start --ide claude-code`,
+      `${shellQuote(ctx.nodeBin)} ${shellQuote(ctx.cliPath)} hook run session-start --ide claude-code`,
     );
     // settings.json must NOT carry mcpServers.cavemem any more.
     expect(settings.mcpServers?.cavemem).toBeUndefined();
@@ -693,9 +695,16 @@ describe('checkWindowsSh (#56)', () => {
   });
 
   it('defaults to process.platform and resolveShDefault when no options are given', () => {
-    // On the non-Windows machines this suite runs on, the default platform
-    // branch is a no-op regardless of whether `sh` is actually resolvable.
-    expect(checkWindowsSh()).toBeNull();
+    // Non-win32: the platform branch is a no-op, always null. win32: the
+    // default resolver shells out to the real `sh`, so the result reflects
+    // whether it's actually on PATH — accept either valid outcome instead of
+    // assuming a non-Windows host.
+    if (process.platform === 'win32') {
+      const result = checkWindowsSh();
+      expect(result === null || result.includes('sh` not found on PATH')).toBe(true);
+    } else {
+      expect(checkWindowsSh()).toBeNull();
+    }
   });
 
   it('resolveShDefault returns a boolean without throwing', () => {
@@ -812,8 +821,10 @@ describe('copilot installer', () => {
     expect(Object.keys(hooks.hooks).sort()).toEqual(
       ['PostToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit'].sort(),
     );
+    // Same shell-quoting as claude-code: nodeBin + cliPath pass through
+    // shellQuote, so win32 backslash paths come out quoted.
     expect(hooks.hooks.SessionStart?.[0]?.command).toBe(
-      `${ctx.nodeBin} ${ctx.cliPath} hook run session-start --ide copilot`,
+      `${shellQuote(ctx.nodeBin)} ${shellQuote(ctx.cliPath)} hook run session-start --ide copilot`,
     );
 
     const mcp = JSON.parse(readFileSync(mcpPath(), 'utf8')) as {
@@ -992,7 +1003,11 @@ describe('augment installer', () => {
     for (const hookId of ['session-start', 'post-tool-use', 'stop', 'session-end']) {
       const wrapper = join(wrapperDir(), `${hookId}.sh`);
       expect(existsSync(wrapper)).toBe(true);
-      expect(statSync(wrapper).mode & 0o111).toBeTruthy();
+      // POSIX exec-bit only exists on real POSIX hosts; `chmodSync(0o755)` is
+      // a no-op for exec on win32, where `statSync().mode` never reports 0o111.
+      if (process.platform !== 'win32') {
+        expect(statSync(wrapper).mode & 0o111).toBeTruthy();
+      }
       const body = readFileSync(wrapper, 'utf8');
       expect(body).toContain(`hook run ${hookId} --ide augment`);
       expect(body.startsWith('#!/bin/sh\n')).toBe(true);
