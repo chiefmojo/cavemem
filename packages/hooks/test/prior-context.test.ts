@@ -69,6 +69,19 @@ describe('buildPriorContext', () => {
     expect(hints.map((h) => h.content)).toEqual(['found me']);
   });
 
+  it('excludes an empty-string session id (old sessionStart semantics)', async () => {
+    // A same-cwd session whose id is '' carries its own summary. sessionStart
+    // always compared `s.id === input.session_id`, so an empty-string id was
+    // excluded; a truthy `opts.excludeSessionId &&` guard would disable that
+    // exclusion and leak the current session's summary as a hint.
+    await seedEnded('', '/proj', { content: 'own summary' });
+    await seedEnded('other', '/proj', { content: 'other summary' });
+
+    const hints = buildPriorContext(store, { cwd: '/proj', excludeSessionId: '' });
+    expect(hints.map((h) => h.sessionId)).toEqual(['other']);
+    expect(hints.map((h) => h.content)).toEqual(['other summary']);
+  });
+
   it('endedOnly skips in-flight sessions and those skips count against the scan cap', async () => {
     await seedEnded('ended-summarized', '/proj', { content: 'too far back' });
     for (let i = 0; i < 10; i++) {

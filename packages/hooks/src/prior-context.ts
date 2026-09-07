@@ -34,7 +34,11 @@ export function buildPriorContext(
   const hints: PriorContextHint[] = [];
   let scanned = 0;
   for (const s of recent) {
-    if (opts.excludeSessionId && s.id === opts.excludeSessionId) continue;
+    // Unconditional (no truthy guard): sessionStart historically compared
+    // `s.id === input.session_id` directly, so an empty-string id is a valid
+    // exclusion target. `s.id === undefined` is always false when the option
+    // is absent.
+    if (s.id === opts.excludeSessionId) continue;
     if (scanned >= MAX_CANDIDATES_SCANNED) break;
     scanned++;
     if (opts.endedOnly && s.ended_at === null) continue;
