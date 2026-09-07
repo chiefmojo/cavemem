@@ -37,6 +37,19 @@ function setDotted(obj: Record<string, unknown>, path: string, value: unknown): 
   if (last) cur[last] = value;
 }
 
+function deleteDotted(obj: Record<string, unknown>, path: string): void {
+  const parts = path.split('.');
+  let cur: unknown = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const k = parts[i];
+    if (!k || cur == null || typeof cur !== 'object') return;
+    cur = (cur as Record<string, unknown>)[k];
+  }
+  if (cur == null || typeof cur !== 'object') return;
+  const last = parts[parts.length - 1];
+  if (last) delete (cur as Record<string, unknown>)[last];
+}
+
 function coerce(raw: string): unknown {
   if (raw === 'true') return true;
   if (raw === 'false') return false;
@@ -123,6 +136,43 @@ export function registerConfigCommand(program: Command): void {
       }
       saveSettings(parsed.data);
       process.stdout.write(`${kleur.green('✓')} ${key} = ${JSON.stringify(coerce(value))}\n`);
+    });
+
+  cfg
+    .command('unset <key>')
+    .description(
+      'Remove a setting, reverting it to its default (removes optional keys like remote.url entirely)',
+    )
+    .action((key: string) => {
+      const settings = loadSettings();
+      if (getDotted(settings, key) === undefined) {
+        process.stderr.write(`${kleur.red('unknown key:')} ${key}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      const next = JSON.parse(JSON.stringify(settings)) as Record<string, unknown>;
+      deleteDotted(next, key);
+      const parsed = SettingsSchema.safeParse(next);
+      if (!parsed.success) {
+        process.stderr.write(`${kleur.red('invalid:')} ${parsed.error.message}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      saveSettings(parsed.data);
+      const nextValue = getDotted(parsed.data, key);
+      const defaultValue = getDotted(defaultSettings, key);
+      let msg: string;
+      if (nextValue === undefined && defaultValue === undefined) {
+        // Optional-no-default key: truly gone from the file.
+        msg = `removed ${key}`;
+      } else if (key === 'dataDir') {
+        // saveSettings strips dataDir when it matches the resolved home, so the
+        // default is re-resolved on every load and never persisted.
+        msg = `reverted dataDir to auto-resolved home: ${JSON.stringify(nextValue)}`;
+      } else {
+        msg = `reverted ${key} to default: ${JSON.stringify(nextValue)}`;
+      }
+      process.stdout.write(`${kleur.green('✓')} ${msg}\n`);
     });
 
   cfg

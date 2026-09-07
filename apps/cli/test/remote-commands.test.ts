@@ -113,7 +113,7 @@ describe('remote CLI commands', () => {
     expect(out).toContain('server:   ok');
     expect(out).toContain('auth:     ok');
     expect(out).toContain('CAVEMEM_REMOTE_TOKEN not set');
-    expect(out).toContain('remove remote.url');
+    expect(out).toContain('cavemem config unset remote.url');
     expect(out).toContain('cavemem stop');
     expect(out).toContain('restore remote.url');
     expect(out).toContain('spool:    1 queued');
