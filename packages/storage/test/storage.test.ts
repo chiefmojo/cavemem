@@ -103,7 +103,13 @@ describe('Storage', () => {
     const t = Date.now();
     storage.createSession({ id: 'empty-1', ide: 'test', cwd: '', started_at: t, metadata: null });
     storage.createSession({ id: 'x-1', ide: 'test', cwd: '/x', started_at: t + 1, metadata: null });
-    storage.createSession({ id: 'empty-2', ide: 'test', cwd: '', started_at: t + 2, metadata: null });
+    storage.createSession({
+      id: 'empty-2',
+      ide: 'test',
+      cwd: '',
+      started_at: t + 2,
+      metadata: null,
+    });
 
     expect(storage.listSessions(10, { cwd: '' }).map((s) => s.id)).toEqual(['empty-2', 'empty-1']);
     // undefined opts.cwd stays machine-wide — all three rows.
