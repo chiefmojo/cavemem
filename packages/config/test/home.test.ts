@@ -188,7 +188,12 @@ describe('saveSettings dataDir portability', () => {
       SettingsSchema.parse({ remote: { url: 'http://worker:37777', token: 'secret-token' } }),
     );
 
-    expect(statSync(settingsPath()).mode & 0o777).toBe(0o600);
+    // POSIX mode bits only exist on real POSIX hosts: on win32, chmodSync
+    // cannot set 0600 and statSync().mode reports 0666. The owner-only intent
+    // is satisfied by NTFS ACLs there (settings lives under the user profile).
+    if (process.platform !== 'win32') {
+      expect(statSync(settingsPath()).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('setting CAVEMEM_HOME after first install moves settingsPath and dataDir together', async () => {
