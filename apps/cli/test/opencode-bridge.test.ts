@@ -116,6 +116,7 @@ afterEach(() => {
 describe('opencode-bridge prior-context priming', () => {
   let home: string;
   let origHome: string | undefined;
+  const closers: Array<() => void> = [];
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cavemem-bridge-test-'));
@@ -127,6 +128,9 @@ describe('opencode-bridge prior-context priming', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    for (const close of closers.splice(0)) {
+      close();
+    }
     if (origHome === undefined) delete process.env.CAVEMEM_HOME;
     else process.env.CAVEMEM_HOME = origHome;
     rmSync(home, { recursive: true, force: true });
@@ -138,21 +142,23 @@ describe('opencode-bridge prior-context priming', () => {
   ): Promise<{
     'experimental.chat.system.transform': SystemTransform;
     event: EventHook;
+    close: () => void;
   }> {
     writeFileSync(
       join(home, 'settings.json'),
       JSON.stringify({ embedding: { provider: 'none' }, ...settings }),
     );
     const mod = await import('../src/opencode-bridge.js');
-    const hooks = (await mod.default({ $: {} as never, directory })) as Record<
-      string,
-      SystemTransform | EventHook
-    >;
+    const hooks = (await mod.default({ $: {} as never, directory })) as {
+      'experimental.chat.system.transform': SystemTransform;
+      event: EventHook;
+      close: () => void;
+    };
+    closers.push(hooks.close);
     return {
-      'experimental.chat.system.transform': hooks[
-        'experimental.chat.system.transform'
-      ] as SystemTransform,
-      event: hooks.event as EventHook,
+      'experimental.chat.system.transform': hooks['experimental.chat.system.transform'],
+      event: hooks.event,
+      close: hooks.close,
     };
   }
 

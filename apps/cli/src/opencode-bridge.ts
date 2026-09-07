@@ -39,6 +39,7 @@ interface Hooks {
     input: { sessionID?: string; model: unknown },
     output: { system: string[] },
   ) => Promise<void>;
+  close?: () => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -460,6 +461,15 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
   }
 
   return {
+    close: () => {
+      try {
+        store?.close();
+      } catch {
+        // Best-effort: a failed close must never take down the plugin.
+      }
+      store = undefined;
+    },
+
     event: async ({ event }) => {
       try {
         if (!event) return;
