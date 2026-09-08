@@ -18,14 +18,14 @@ A cross-agent persistent memory system for coding assistants. It captures observ
 |-----------|------------------------|--------------|
 | `packages/config/` | Single authority for settings — zod `SettingsSchema` (incl. `remote`, `workerHost`, `workerAllowedHosts`), portable `settings.json` load/save, `settingsDocs()`, home/data-dir resolution + shared `worker-token` path, path-glob matching. | [View Map](packages/config/codemap.md) |
 | `packages/compress/` | Deterministic caveman-grammar compression engine — `compress`/`expand`, technical-token-preserving tokenizer, privacy scrubbers. | [View Map](packages/compress/codemap.md) |
-| `packages/storage/` | Sole SQLite owner — idempotent schema (WAL + FTS5 + sync triggers), dual backend, BM25 `searchFts`, embedding persistence. | [View Map](packages/storage/codemap.md) |
+| `packages/storage/` | Sole SQLite owner — idempotent schema (WAL + FTS5 + sync triggers), dual backend, BM25 `searchFts`, sessions/summaries read paths incl. `summaryCoverage()`, embedding persistence. | [View Map](packages/storage/codemap.md) |
 | `packages/core/` | Domain layer — models, hybrid ranker, session IDs, and `MemoryStore`, the single enforced write path (redact → compress → persist). | [View Map](packages/core/codemap.md) |
 | `packages/embedding/` | Provider factory — `Embedder { model, dim, embed }` (local/Ollama/OpenAI/`none`), dim correctness before first use, musl-libc guard. | [View Map](packages/embedding/codemap.md) |
-| `packages/hooks/` | IDE lifecycle handlers plus a mode-aware dispatcher: local/injected `MemoryStore`, remote HTTP delivery, bounded spool replay, and local-only worker auto-spawn. | [View Map](packages/hooks/codemap.md) |
+| `packages/hooks/` | IDE lifecycle handlers plus a mode-aware dispatcher: local/injected `MemoryStore`, remote HTTP delivery, bounded spool replay, shared prior-context hint builder (`buildPriorContext`), and local-only worker auto-spawn. | [View Map](packages/hooks/codemap.md) |
 | `packages/installers/` | Per-IDE detect/install/uninstall modules registering hooks + MCP entries across nine IDEs behind a uniform `Installer` contract. | [View Map](packages/installers/codemap.md) |
 | `apps/cli/` | The published `cavemem` npm binary — commander CLI + OpenCode plugin bridge + prepack/pack-release publish tooling. | [View Map](apps/cli/codemap.md) |
 | `apps/mcp-server/` | Shared progressive-disclosure MCP server builder plus local stdio transport and opt-in SSRF-hardened web enrichment. | [View Map](apps/mcp-server/codemap.md) |
-| `apps/worker/` | HTTP daemon bound to `workerHost` (loopback by default): viewer, embedding backfill, bearer-protected remote hooks, and streamable HTTP MCP. | [View Map](apps/worker/codemap.md) |
+| `apps/worker/` | HTTP daemon bound to `workerHost` (loopback by default): viewer, embedding backfill, bearer-protected remote hooks and prior-session priming reads (`GET /api/context`), and streamable HTTP MCP. | [View Map](apps/worker/codemap.md) |
 | `evals/` | Token-savings benchmark harness running `@cavemem/compress` over a fixed corpus. | [View Map](evals/codemap.md) |
 | `hooks-scripts/` | Portable shell stubs that invoke `cavemem hook run <event>`. | [View Map](hooks-scripts/codemap.md) |
 | `scripts/` | End-to-end publish harnesses for changesets, legacy `publish:release`, and isolated remote server/client mode. | [View Map](scripts/codemap.md) |

@@ -4,11 +4,12 @@ Shared CLI helpers.
 
 ## Responsibility
 
-Three modules:
+Four modules:
 
 - `resolve.ts#resolveCliPath()` — resolves the absolute path to the running `cavemem` CLI binary.
 - `mode.ts` — remote-vs-local mode detection and the local-only command guard.
 - `remote.ts` — remote-mode HTTP client calls (search + server health/auth probe).
+- `summary-coverage.ts` — pure formatter for per-IDE turn-summary coverage rows (`doctor`/`status`).
 
 ## Design
 
@@ -30,6 +31,10 @@ Thin `fetch` wrappers over the `RemoteTarget { url, token, timeoutMs }` produced
 
 A 401 is not special-cased here (it's just `!res.ok`): unlike the hook POST path — where `RemoteAuthError` exists so the runner knows spooling/replay would fail identically — search/probe failures are terminal for the command anyway.
 
+### `summary-coverage.ts`
+
+`formatSummaryCoverage(rows)` renders `SummaryCoverageRow { ide, sessions, summaries }` rows as `ide summaries/sessions`, comma-joined. A row with `sessions > 0 && summaries === 0` is wrapped in `kleur.yellow`: that shape means the IDE records sessions but `turn_summary` never arrives — in practice a stale hand-written OpenCode bridge plugin shadowing the bundled one (OpenCode loads every file in its `plugins/` dir, WP #210). Deliberately pure — no I/O; the underlying query, including folding empty `ide` values into an `unknown` bucket, lives in `packages/storage` (`Storage.summaryCoverage`).
+
 ## Flow
 
 `resolveCliPath()` consumers:
@@ -44,9 +49,14 @@ A 401 is not special-cased here (it's just `!res.ok`): unlike the hook POST path
 - **Local-only** (`requireLocal` bail): `commands/export.ts` (`export`/`import`), `commands/lifecycle.ts` (`start`/`stop`/`restart`/`viewer`), `commands/worker.ts` (`worker start/run/stop/status`), `commands/mcp.ts`, `commands/reindex.ts`.
 - Unguarded by design: `hook run` needs no mode check in this layer — `@cavemem/hooks#runHook` itself dispatches to `postHook()` when remote.
 
+`formatSummaryCoverage()` consumers (local mode only — the remote branch of both commands returns before the DB section):
+
+- `commands/doctor.ts` / `commands/status.ts` — feed it the rows from `Storage.summaryCoverage()` and print the result as their `summaries:` line.
+
 ## Integration
 
 - `resolve.ts` consumers: `src/commands/{install,uninstall,lifecycle,worker}.ts` (see `../util/resolve.js` imports).
 - `mode.ts`/`remote.ts` depend on `@cavemem/config` (`Settings`) and — for `remote.ts` — `@cavemem/hooks` (`remoteTarget`, `RemoteTarget`) and `@cavemem/core` (`SearchResult`). The endpoints they call are served by `apps/worker`'s Hono server (`/healthz`, `/api/state`, `/api/search`), which in remote mode runs on the central machine.
+- `summary-coverage.ts` depends only on `kleur`; its input rows come from `Storage.summaryCoverage()` (`@cavemem/storage`), so the SQL-side bucketing (empty/null `ide` folded into `unknown`) lives in the storage package and this module stays a pure formatter.
 - Counterpart: `src/index.ts#isMainEntry()` solves the same npm-symlink problem from the other side (comparing `import.meta.url` against the realpath of `argv[1]`).
 - The `resolveCliPath()` output ends up in persisted IDE configs, so a wrong value surfaces only after install — this is one of the failure modes covered by `scripts/e2e-publish.sh` (bin-shim resolution check).
