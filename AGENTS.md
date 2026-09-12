@@ -29,6 +29,10 @@ Local by default — the default configuration makes no network calls; remote em
 
 Use concise Conventional Commit subjects (`feat:`, `fix:`, `docs:`, `chore:`, `test:`), for example `feat: add hook replay metric` or `fix: preserve URL token`. Author commits `--author="Erick <chiefmojo@chiefmojo.com>"`; never add a `Co-Authored-By: <agent>` trailer. When an agent posts a PR comment, review, or description in its own voice, self-identify in the body text with a leading `## <agent name> review — <verdict>` heading instead. PRs need a green CI run and one review; describe the behavior change and the validation commands run, and include a changeset for any `apps/*` or `packages/*` change. Version and dependency bumps go through a PR — never a direct-push bump.
 
+**Documentation does not need a PR; code and configuration do.** Markdown — `CLAUDE.md`, `AGENTS.md`, `README.md`, and anything under `docs/` — can be committed and pushed straight to `main`. A doc-only change stranded in an unmerged branch is worse than no change, because the next agent reads the stale version.
+
+Everything else goes through a PR that **Erick** merges. Never merge your own PR, never self-approve, and never push code or config direct to `main` because the change looks small. A branch touching both code and its documentation is a **code** change and goes through the PR whole — don't split the docs out to land them early.
+
 ## Project Status — OpenProject
 
 Companion Core status lives in OpenProject (`http://neuromancer:8000`). Sub-projects: Hermes / Identity / Infrastructure / Memory (fork tooling like this lands under Infrastructure or Memory). API reference: `companion-ops/docs/openproject-api-reference.md`.
