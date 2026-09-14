@@ -176,6 +176,14 @@ describe('persisted capture interpreters', () => {
       fsUtils.parseCavememHook('echo /tmp/report.js hook run stop --ide codex', 'codex'),
     ).toBeUndefined();
   });
+  it('recognizes the legacy direct-JavaScript hook shape without inventing a Node path', () => {
+    expect(
+      fsUtils.parseCavememHook(
+        '/old/cavemem/index.js hook run stop --ide claude-code',
+        'claude-code',
+      ),
+    ).toEqual({ event: 'stop' });
+  });
   describe.each([
     ['claude-code', '.claude/settings.json', true],
     ['codex', '.codex/hooks.json', true],
@@ -228,6 +236,19 @@ describe('persisted capture interpreters', () => {
         }),
       ).toEqual([expect.objectContaining({ code: 'node-missing', ide })]);
     });
+    it.each(['install', 'uninstall'] as const)(
+      '%s removes a legacy direct-JavaScript Cavemem hook',
+      async (operation) => {
+        const command = `/old/cavemem/index.js hook run stop --ide ${ide}`;
+        write(file, makeConfig(command));
+        await getInstaller(ide)[operation](ctx);
+        const configPath = join(dir, file);
+        const hooks = existsSync(configPath)
+          ? (JSON.parse(readFileSync(configPath, 'utf8')).hooks?.Stop ?? [])
+          : [];
+        expect(JSON.stringify(hooks)).not.toContain(command);
+      },
+    );
   });
 
   describe.each([

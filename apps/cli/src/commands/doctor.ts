@@ -38,7 +38,7 @@ export function registerDoctorCommand(program: Command): void {
           process.stdout.write(
             `${diagnostic.ide}: ${kleur.yellow(diagnostic.message)} — run \`${diagnostic.remedy}\`\n`,
           );
-          process.exitCode = 1;
+          if (diagnostic.code === 'node-missing') process.exitCode = 1;
         }
       }
       if (target) {
@@ -76,20 +76,32 @@ export function registerDoctorCommand(program: Command): void {
         return;
       }
       const dbPath = join(dir, 'data.db');
-      try {
-        if (!existsSync(dbPath)) throw new Error('database does not exist');
-        const s = new Storage(dbPath, { readonly: true });
-        const sessions = s.listSessions(1).length;
-        const coverage = s.summaryCoverage();
-        s.close();
-        process.stdout.write(`db:       ${dbPath} ${kleur.green('ok')} (${sessions} sessions)\n`);
-        if (coverage.length > 0) {
-          // IDEs with sessions but zero turn summaries are losing turn_summary.
-          process.stdout.write(`summaries: ${formatSummaryCoverage(coverage)}\n`);
+      if (!existsSync(dbPath)) {
+        process.stdout.write(
+          `db:       ${dbPath} ${kleur.dim('none yet (no sessions captured)')}\n`,
+        );
+      } else {
+        let storage: Storage | undefined;
+        try {
+          storage = new Storage(dbPath, { readonly: true });
+          const sessions = storage.listSessions(1).length;
+          const coverage = storage.summaryCoverage();
+          process.stdout.write(`db:       ${dbPath} ${kleur.green('ok')} (${sessions} sessions)\n`);
+          if (coverage.length > 0) {
+            // IDEs with sessions but zero turn summaries are losing turn_summary.
+            process.stdout.write(`summaries: ${formatSummaryCoverage(coverage)}\n`);
+          }
+        } catch (err) {
+          const sqliteError = err as { code?: string; message?: string };
+          const message =
+            sqliteError.code === 'SQLITE_ERROR' && sqliteError.message?.includes('no such table')
+              ? 'schema out of date — run `cavemem reindex`'
+              : String(err);
+          process.stdout.write(`db:       ${dbPath} ${kleur.red('fail')} ${message}\n`);
+          process.exitCode = 1;
+        } finally {
+          storage?.close();
         }
-      } catch (err) {
-        process.stdout.write(`db:       ${dbPath} ${kleur.red('fail')} ${String(err)}\n`);
-        process.exitCode = 1;
       }
       process.stdout.write(`port:     ${settings.workerPort}\n`);
       process.stdout.write(`comp:     intensity=${settings.compression.intensity}\n`);

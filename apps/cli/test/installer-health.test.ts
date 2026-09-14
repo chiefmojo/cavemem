@@ -119,6 +119,44 @@ it.each([false, true])(
 it('doctor does not create a missing database', async () => {
   await run('doctor');
   expect(existsSync(join(state.home, 'data/data.db'))).toBe(false);
+  expect(out).toContain('none yet (no sessions captured)');
+  expect(process.exitCode).toBeUndefined();
+});
+
+it('doctor reports an out-of-date database schema with a repair command', async () => {
+  const path = join(state.home, 'data/data.db');
+  mkdirSync(join(state.home, 'data'), { recursive: true });
+  writeFileSync(path, '');
+
+  await run('doctor');
+
+  expect(out).toContain('schema out of date');
+  expect(out).toContain('cavemem reindex');
+  expect(out).not.toContain('no such table');
+  expect(process.exitCode).toBe(1);
+});
+
+it('doctor treats an existing Homebrew Cellar interpreter as advisory', async () => {
+  const node = join(state.home, 'Cellar/node/24.1.0/bin/node');
+  mkdirSync(join(state.home, 'Cellar/node/24.1.0/bin'), { recursive: true });
+  writeFileSync(node, '', { mode: 0o755 });
+  mkdirSync(join(state.home, '.cursor'), { recursive: true });
+  writeFileSync(
+    join(state.home, '.cursor/mcp.json'),
+    JSON.stringify({ mcpServers: { cavemem: { command: node, args: ['cli.js', 'mcp'] } } }),
+  );
+  saveSettings({
+    ...defaultSettings,
+    dataDir: join(state.home, 'data'),
+    embedding: { ...defaultSettings.embedding, provider: 'none' },
+    ides: { cursor: true },
+  });
+
+  await run('doctor');
+
+  expect(out).toContain('pinned to a Homebrew Cellar version');
+  expect(out).toContain('cavemem install --ide cursor');
+  expect(process.exitCode).toBeUndefined();
 });
 
 it('doctor leaves existing database contents unchanged', async () => {

@@ -48,7 +48,7 @@ export function shellQuote(p: string): string {
 export function parseCavememHook(
   command: unknown,
   ide: string,
-): { nodeBin: string; event: string } | undefined {
+): { nodeBin?: string; event: string } | undefined {
   if (typeof command !== 'string' || /[\r\n]/.test(command)) return undefined;
   const input = command.trim();
   const token = /"((?:\\"|[^"])*)"|'([^']*)'|([\w@%+=:,./-]+)/y;
@@ -65,24 +65,39 @@ export function parseCavememHook(
     while (offset < input.length && /\s/.test(input[offset] ?? '')) offset++;
   }
   if (args[0] === 'exec') args.shift();
+  let nodeBin: string | undefined;
+  let event: string | undefined;
   if (
-    args.length !== 7 ||
-    !args[0] ||
-    !args[1] ||
-    args[2] !== 'hook' ||
-    args[3] !== 'run' ||
-    args[5] !== '--ide' ||
-    args[6] !== ide
-  )
+    args.length === 7 &&
+    args[0] &&
+    args[1] &&
+    /^(?:.*[\\/])?node(?:\.exe)?$/i.test(args[0]) &&
+    args[2] === 'hook' &&
+    args[3] === 'run' &&
+    args[5] === '--ide' &&
+    args[6] === ide
+  ) {
+    nodeBin = args[0];
+    event = args[4];
+  } else if (
+    args.length === 6 &&
+    args[0] &&
+    /^(?:\/|[A-Za-z]:[\\/]|\\\\).+\.js$/i.test(args[0]) &&
+    args[1] === 'hook' &&
+    args[2] === 'run' &&
+    args[4] === '--ide' &&
+    args[5] === ide
+  ) {
+    event = args[3];
+  } else {
     return undefined;
-  if (!/^(?:.*[\\/])?node(?:\.exe)?$/i.test(args[0])) return undefined;
-  const event = args[4];
+  }
   if (
     !event ||
     !['session-start', 'user-prompt-submit', 'post-tool-use', 'stop', 'session-end'].includes(event)
   )
     return undefined;
-  return { nodeBin: args[0], event };
+  return nodeBin ? { nodeBin, event } : { event };
 }
 
 export function deepMerge<T>(base: T, add: Partial<T>): T {

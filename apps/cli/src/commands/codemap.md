@@ -2,7 +2,7 @@
 
 One module per `cavemem` subcommand (or small subcommand family). Each exports a `register*Command(program: Command)` function that attaches its command(s) to the root commander program; no module executes at import time.
 
-Installer contexts use `resolveNodePath()` to preserve stable Node PATH links. `doctor` calls each enabled installer's `diagnose(ctx)` in both local and remote mode and reports the IDE-specific reinstall remedy with exit code 1. Diagnosis never repairs configs. The existing local DB check opens only an existing database with `readonly: true`; SQLite may manage WAL/SHM sidecars during reads.
+Installer contexts use `resolveNodePath()` to preserve stable Node PATH links. `doctor` calls each enabled installer's `diagnose(ctx)` in both local and remote mode and reports the IDE-specific reinstall remedy; a missing interpreter fails the command, while a version-pinned interpreter is advisory. Diagnosis never repairs configs. A missing local database is healthy before the first captured session; an existing database is opened with `readonly: true`, and an outdated schema reports the `cavemem reindex` remedy without mutating it. SQLite may manage WAL/SHM sidecars during reads.
 
 ## Responsibility
 

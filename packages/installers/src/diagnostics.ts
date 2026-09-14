@@ -28,7 +28,7 @@ export function hookNodes(
   const platform = ctx.platform ?? process.platform;
   const addCommand = (value: unknown) => {
     const invocation = parseCavememHook(value, ide);
-    if (invocation) nodes.push(invocation.nodeBin);
+    if (invocation?.nodeBin) nodes.push(invocation.nodeBin);
   };
   for (const groups of Object.values(record(record(config).hooks))) {
     if (!Array.isArray(groups)) continue;

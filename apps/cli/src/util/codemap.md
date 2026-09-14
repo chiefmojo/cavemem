@@ -2,7 +2,7 @@
 
 Shared CLI helpers.
 
-`resolve.ts#resolveNodePath()` selects the first usable absolute PATH Node entry whose realpath matches the running interpreter, preserving the PATH symlink in persisted installer commands. It falls back to `process.execPath`; Windows uses `node.exe`, semicolon-separated PATH, and case-insensitive realpath comparison.
+`resolve.ts#resolveNodePath()` selects the first usable absolute PATH Node entry whose realpath matches the running interpreter, preserving the PATH symlink in persisted installer commands. When PATH omits that link, a running Homebrew Cellar Node can recover its prefix-level `bin/node` symlink before falling back to `process.execPath`; Windows uses `node.exe`, semicolon-separated PATH, and case-insensitive realpath comparison.
 
 ## Responsibility
 

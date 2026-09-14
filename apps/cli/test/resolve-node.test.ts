@@ -51,6 +51,13 @@ describe('stable installer Node path', () => {
     );
   });
 
+  it('finds the Homebrew prefix symlink when the install PATH omits it', () => {
+    const execPath = binary(join(dir, 'Cellar/node@24/24.1.0/bin/node'));
+    fs.mkdirSync(join(dir, 'bin'));
+    fs.symlinkSync(execPath, join(dir, 'bin/node'));
+    expect(resolve.resolveNodePath({ execPath, path: '' })).toBe(join(dir, 'bin/node'));
+  });
+
   it('skips unrelated, missing, empty, and relative PATH candidates in order', () => {
     const execPath = binary(join(dir, 'runtime/node'));
     binary(join(dir, 'other/node'));
