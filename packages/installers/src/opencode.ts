@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
@@ -10,6 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { diagnoseNodes, mcpNode } from './diagnostics.js';
 import { readJson, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
@@ -22,6 +24,30 @@ interface OpenCodeConfig {
   mcp?: Record<string, OpenCodeMcpEntry>;
   mcpServers?: Record<string, { command: string; args?: string[] }>;
   plugin?: string[];
+}
+
+const EFFECTIVE_CONFIG_UNAVAILABLE =
+  'OpenCode configuration verification failed: could not read effective configuration with `opencode debug config --pure`. Cavemem left other OpenCode configuration sources unchanged.';
+const EFFECTIVE_CONFIG_MISMATCH =
+  'OpenCode configuration verification failed: effective mcp.cavemem does not match the installed configuration. Cavemem left other OpenCode configuration sources unchanged. Inspect `opencode debug config --pure` and remove or update the shadowing entry.';
+
+function verifyEffectiveConfig(intended: OpenCodeMcpEntry): void {
+  const result = spawnSync('opencode', ['debug', 'config', '--pure'], {
+    encoding: 'utf8',
+    maxBuffer: 4 * 1024 * 1024,
+    shell: process.platform === 'win32',
+    timeout: 10_000,
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) throw new Error(EFFECTIVE_CONFIG_UNAVAILABLE);
+
+  let effective: unknown;
+  try {
+    effective = (JSON.parse(result.stdout) as { mcp?: { cavemem?: unknown } }).mcp?.cavemem;
+  } catch {
+    throw new Error(EFFECTIVE_CONFIG_UNAVAILABLE);
+  }
+  if (!isDeepStrictEqual(effective, intended)) throw new Error(EFFECTIVE_CONFIG_MISMATCH);
 }
 
 function configRoot(ctx: InstallContext): string {
@@ -189,6 +215,9 @@ export const openCode: Installer = {
         // Ignore parse errors in legacy config — not our file anymore.
       }
     }
+
+    verifyEffectiveConfig(entry);
+    messages.push('verified effective OpenCode MCP configuration');
 
     return messages;
   },
