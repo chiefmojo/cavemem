@@ -18,6 +18,8 @@ export function resolveNodePath(
     for (const entry of (options.path ?? process.env.PATH ?? '').split(paths.delimiter)) {
       const dir = platform === 'win32' ? entry.replace(/^"(.*)"$/, '$1') : entry;
       if (!paths.isAbsolute(dir)) continue;
+      // A lone Windows root (\tools or /tools) depends on the working drive.
+      if (platform === 'win32' && paths.parse(dir).root.length <= 1) continue;
       const candidate = paths.join(dir, platform === 'win32' ? 'node.exe' : 'node');
       try {
         if (!statSync(candidate).isFile()) continue;

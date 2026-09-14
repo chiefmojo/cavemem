@@ -41,8 +41,15 @@ function mcpFile(ctx: InstallContext): string {
   return join(ctx.ideConfigDir, '.claude.json');
 }
 
-function isCavememHookEntry(entry: ClaudeHookEntry, hookId: string): boolean {
-  return entry.hooks.some((h) => h.type === 'command' && h.command.includes(`hook run ${hookId}`));
+function withoutCavememHooks(entries: ClaudeHookEntry[], hookId: string): ClaudeHookEntry[] {
+  return entries
+    .map((entry) => ({
+      ...entry,
+      hooks: entry.hooks.filter(
+        (h) => !(h.type === 'command' && h.command.includes(`hook run ${hookId}`)),
+      ),
+    }))
+    .filter((entry) => entry.hooks.length > 0);
 }
 
 export const claudeCode: Installer = {
@@ -77,7 +84,7 @@ export const claudeCode: Installer = {
       const existing = hooks[claudeName] ?? [];
       // Strip prior cavemem entries (idempotent re-install) but keep
       // everything else verbatim.
-      const others = existing.filter((entry) => !isCavememHookEntry(entry, hookId));
+      const others = withoutCavememHooks(existing, hookId);
       if (others.length > 0) preservedNonCavemem = true;
       others.push({
         hooks: [
@@ -155,7 +162,7 @@ export const claudeCode: Installer = {
         for (const [claudeName, hookId] of HOOK_NAMES) {
           const arr = settings.hooks[claudeName];
           if (!arr) continue;
-          const remaining = arr.filter((entry) => !isCavememHookEntry(entry, hookId));
+          const remaining = withoutCavememHooks(arr, hookId);
           if (remaining.length === 0) delete settings.hooks[claudeName];
           else settings.hooks[claudeName] = remaining;
         }

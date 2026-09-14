@@ -154,6 +154,48 @@ describe.each(mcpCases)('%s interpreter diagnostics', (ide, file, key) => {
 });
 
 describe('persisted capture interpreters', () => {
+  describe.each([
+    ['claude-code', '.claude/settings.json'],
+    ['codex', '.codex/hooks.json'],
+    ['augment', '.augment/settings.json'],
+  ] as const)('%s mixed hook groups', (ide, file) => {
+    it.each(['install', 'uninstall'] as const)(
+      '%s retains user hooks and group metadata',
+      async (operation) => {
+        const userHook = { type: 'command', command: 'echo USER_HOOK', timeout: 17 };
+        const userGroup = {
+          matcher: 'user-only',
+          hooks: [{ type: 'command', command: 'echo OTHER_USER_HOOK' }],
+        };
+        const cavememHook = {
+          type: 'command',
+          command:
+            ide === 'augment'
+              ? join(dir, '.augment/cavemem-hooks/post-tool-use.sh')
+              : `"${join(dir, 'deleted/node')}" "${ctx.cliPath}" hook run post-tool-use --ide ${ide}`,
+        };
+        const metadata = { matcher: '.*', userMetadata: { preserve: true } };
+        write(file, {
+          hooks: {
+            PostToolUse: [
+              { ...metadata, hooks: [cavememHook, userHook] },
+              { hooks: [cavememHook] },
+              userGroup,
+            ],
+          },
+        });
+
+        await getInstaller(ide)[operation](ctx);
+
+        const groups = JSON.parse(readFileSync(join(dir, file), 'utf8')).hooks.PostToolUse;
+        expect(groups).toContainEqual({ ...metadata, hooks: [userHook] });
+        expect(groups).toContainEqual(userGroup);
+        expect(groups).toHaveLength(operation === 'install' ? 3 : 2);
+        if (operation === 'install') expect(await getInstaller(ide).diagnose(ctx)).toEqual([]);
+      },
+    );
+  });
+
   it('tolerates a malformed OpenCode sidecar without printing its contents', async () => {
     write('.config/opencode/cavemem-bridge.json', 'null');
     expect(await getInstaller('opencode').diagnose(ctx)).toEqual([]);

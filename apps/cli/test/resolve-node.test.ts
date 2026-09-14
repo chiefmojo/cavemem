@@ -24,6 +24,24 @@ function binary(path: string): string {
 }
 
 describe('stable installer Node path', () => {
+  it.each(['\\tools', '/tools'])(
+    'rejects drive-dependent Windows PATH root %s and keeps a later UNC candidate',
+    (rooted) => {
+      const execPath = 'C:\\Runtime\\node.exe';
+      vi.spyOn(fs, 'realpathSync').mockReturnValue(execPath);
+      vi.spyOn(fs, 'statSync').mockReturnValue({ isFile: () => true } as fs.Stats);
+      vi.spyOn(fs, 'accessSync').mockImplementation(() => {});
+      expect(
+        resolve.resolveNodePath({
+          execPath,
+          platform: 'win32',
+          path: `${rooted};\\\\server\\share\\tools`,
+        }),
+      ).toBe('\\\\server\\share\\tools\\node.exe');
+      expect(resolve.resolveNodePath({ execPath, platform: 'win32', path: rooted })).toBe(execPath);
+    },
+  );
+
   it('preserves a Homebrew PATH symlink to the running Cellar interpreter', () => {
     const execPath = binary(join(dir, 'Cellar/node/24.1.0/bin/node'));
     fs.mkdirSync(join(dir, 'bin'));

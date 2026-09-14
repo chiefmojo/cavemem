@@ -71,9 +71,14 @@ function writeWrapper(ctx: InstallContext, hookId: string): string {
   return file;
 }
 
-function isCavememGroup(ctx: InstallContext, group: AugmentHookGroup): boolean {
+function withoutCavememHooks(ctx: InstallContext, groups: AugmentHookGroup[]): AugmentHookGroup[] {
   const dir = wrapperDir(ctx);
-  return group.hooks.some((h) => h.type === 'command' && h.command.startsWith(dir));
+  return groups
+    .map((group) => ({
+      ...group,
+      hooks: group.hooks.filter((h) => !(h.type === 'command' && h.command.startsWith(dir))),
+    }))
+    .filter((group) => group.hooks.length > 0);
 }
 
 export const augment: Installer = {
@@ -105,7 +110,7 @@ export const augment: Installer = {
     const settings = readJson<AugmentSettings>(path, {});
     const hooks: Record<string, AugmentHookGroup[]> = { ...(settings.hooks ?? {}) };
     for (const [eventName, hookId, opts] of HOOK_NAMES) {
-      const others = (hooks[eventName] ?? []).filter((g) => !isCavememGroup(ctx, g));
+      const others = withoutCavememHooks(ctx, hooks[eventName] ?? []);
       const command: AugmentHookCommand = { type: 'command', command: wrapperPath(ctx, hookId) };
       if (opts.conversationData) command.metadata = { includeConversationData: true };
       others.push({
@@ -136,7 +141,7 @@ export const augment: Installer = {
         for (const [eventName] of HOOK_NAMES) {
           const arr = settings.hooks[eventName];
           if (!arr) continue;
-          const remaining = arr.filter((g) => !isCavememGroup(ctx, g));
+          const remaining = withoutCavememHooks(ctx, arr);
           if (remaining.length === 0) delete settings.hooks[eventName];
           else settings.hooks[eventName] = remaining;
         }
