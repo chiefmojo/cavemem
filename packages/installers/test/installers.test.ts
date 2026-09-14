@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { antigravity } from '../src/antigravity.js';
@@ -26,21 +26,25 @@ import { findForeignBridges, openCode } from '../src/opencode.js';
 import { getInstaller, installers } from '../src/registry.js';
 import type { InstallContext } from '../src/types.js';
 import { checkWindowsSh, resolveShDefault } from '../src/windows-sh.js';
+import { writeFakeOpenCode } from './fake-opencode.js';
 
 let home: string;
 let originalHome: string | undefined;
 let originalUserProfile: string | undefined;
+let originalPath: string | undefined;
 let ctx: InstallContext;
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'cavemem-ins-'));
   originalHome = process.env.HOME;
   originalUserProfile = process.env.USERPROFILE;
+  originalPath = process.env.PATH;
   process.env.HOME = home;
   // node:os.homedir() reads USERPROFILE on Windows; keep them in sync so the
   // installer's homedir() call lines up with the test's `home` regardless of
   // platform.
   process.env.USERPROFILE = home;
+  process.env.PATH = `${writeFakeOpenCode(home)}${delimiter}${originalPath ?? ''}`;
 
   // Place the fake CLI and bridge inside the temp dir so the opencode
   // installer can create a real symlink during install.
@@ -66,6 +70,8 @@ afterEach(() => {
   else process.env.HOME = originalHome;
   if (originalUserProfile === undefined) delete process.env.USERPROFILE;
   else process.env.USERPROFILE = originalUserProfile;
+  if (originalPath === undefined) delete process.env.PATH;
+  else process.env.PATH = originalPath;
   rmSync(home, { recursive: true, force: true });
 });
 

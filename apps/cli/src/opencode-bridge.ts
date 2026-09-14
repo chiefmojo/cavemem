@@ -26,6 +26,14 @@ type BunShell = (
 
 interface PluginInput {
   $: BunShell;
+  client: {
+    mcp: {
+      status: () => Promise<{
+        data?: Record<string, { status?: string }>;
+        error?: unknown;
+      }>;
+    };
+  };
   directory: string;
 }
 
@@ -77,13 +85,17 @@ function log(msg: string): void {
 // Plugin
 /* ------------------------------------------------------------------ */
 
-export default async function cavememBridge({ directory }: PluginInput): Promise<Hooks> {
+export default async function cavememBridge({ client, directory }: PluginInput): Promise<Hooks> {
   const CAVEMEM = resolveCavememCli();
 
   const NODE_UNAVAILABLE_MSG =
     "Cavemem memory capture is disabled: no usable Node.js runtime was found, so new sessions will not be saved. Install Node.js 20+ and make sure it is on OpenCode's PATH (or rerun `cavemem install --ide opencode`), then restart OpenCode.";
   const CLI_NOT_FOUND_MSG =
     "Cavemem memory capture is disabled: the cavemem CLI could not be found, so new sessions will not be saved. Reinstall with `cavemem install --ide opencode` (or verify cavemem is on OpenCode's PATH), then restart OpenCode.";
+  const TOOLS_NOTICE =
+    'You have cavemem memory tools (search, timeline, get_observations, list_sessions). Use them when past context would help.';
+  const TOOLS_UNAVAILABLE =
+    'Cavemem memory tools are unavailable in this OpenCode session. Run `cavemem install --ide opencode`, then restart OpenCode.';
 
   // Resolve node on every platform: a `.js` CLI needs a runtime everywhere, and
   // on POSIX the `#!/usr/bin/env node` shebang searches the same inherited PATH
@@ -138,10 +150,15 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
   const activeSessions = new Set<string>();
   // Track which sessions already received retrieved context.
   const queriedSessions = new Set<string>();
+  // One status request per turn. The next user message starts a new turn and
+  // clears this promise; sharing the in-flight promise also deduplicates
+  // concurrent system transforms.
+  const mcpStatusBySession = new Map<string, Promise<boolean>>();
   // Accumulate assistant message text by message ID.
   const messageTexts = new Map<string, { sessionID: string; text: string }>();
-  // Track which message IDs are user messages (for prompt capture).
-  const userMessageIds = new Set<string>();
+  // Track the latest user message per session so repeated updates for the same
+  // prompt do not start extra turns or duplicate MCP status requests.
+  const lastUserMessageBySession = new Map<string, string>();
 
   // Prior-session priming source. Remote mode: prime from the worker via
   // /api/context — the client-local data.db is empty/stale here (WP #222),
@@ -294,6 +311,26 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
     }
   }
 
+  function cavememToolsConnected(sessionID: string): Promise<boolean> {
+    const cached = mcpStatusBySession.get(sessionID);
+    if (cached) return cached;
+    const status = (async () => {
+      try {
+        const result = await client.mcp.status();
+        if (result.error) {
+          log('MCP status unavailable: SDK error response');
+          return false;
+        }
+        return result.data?.cavemem?.status === 'connected';
+      } catch (err) {
+        log(`MCP status unavailable: ${errorName(err)}`);
+        return false;
+      }
+    })();
+    mcpStatusBySession.set(sessionID, status);
+    return status;
+  }
+
   return {
     close: () => {
       try {
@@ -332,6 +369,8 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
             }
             activeSessions.delete(sid);
             queriedSessions.delete(sid);
+            mcpStatusBySession.delete(sid);
+            lastUserMessageBySession.delete(sid);
             await runHook('session-end', { session_id: sid });
             break;
           }
@@ -344,6 +383,8 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
             }
             activeSessions.delete(session.id);
             queriedSessions.delete(session.id);
+            mcpStatusBySession.delete(session.id);
+            lastUserMessageBySession.delete(session.id);
             await runHook('session-end', {
               session_id: session.id,
             });
@@ -412,7 +453,10 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
             if (!sid || !mid) return;
 
             if (info.role === 'user') {
-              userMessageIds.add(mid);
+              if (lastUserMessageBySession.get(sid) !== mid) {
+                mcpStatusBySession.delete(sid);
+                lastUserMessageBySession.set(sid, mid);
+              }
               const buffered = messageTexts.get(mid);
               const text = info.summary?.body || buffered?.text || '';
               messageTexts.delete(mid);
@@ -456,9 +500,7 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
         }
         const sid = input?.sessionID;
         if (!sid) return;
-        output.system.push(
-          'You have cavemem memory tools (search, timeline, get_observations, list_sessions). Use them when past context would help.',
-        );
+        output.system.push((await cavememToolsConnected(sid)) ? TOOLS_NOTICE : TOOLS_UNAVAILABLE);
         const context = await getRecentContext(sid);
         if (context) {
           output.system.push(context);

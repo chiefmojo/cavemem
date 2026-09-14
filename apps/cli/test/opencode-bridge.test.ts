@@ -28,6 +28,30 @@ type EventHook = (input: {
   event: { type: string; properties?: Record<string, unknown> };
 }) => Promise<void>;
 
+type McpStatus = () => Promise<{
+  data?: Record<string, { status: string }>;
+  error?: unknown;
+  request: Request;
+  response: Response;
+}>;
+
+function mcpResponse(
+  data?: Record<string, { status: string }>,
+  error?: unknown,
+): Awaited<ReturnType<McpStatus>> {
+  return {
+    ...(data ? { data } : {}),
+    ...(error ? { error } : {}),
+    request: new Request('http://localhost/mcp'),
+    response: new Response(null, { status: error ? 500 : 200 }),
+  };
+}
+
+const TOOLS_NOTICE =
+  'You have cavemem memory tools (search, timeline, get_observations, list_sessions). Use them when past context would help.';
+const TOOLS_UNAVAILABLE =
+  'Cavemem memory tools are unavailable in this OpenCode session. Run `cavemem install --ide opencode`, then restart OpenCode.';
+
 /** Minimal ChildProcess shape the bridge's fire-and-forget runHook touches. */
 function fakeChild(): ChildProcess {
   return {
@@ -139,6 +163,7 @@ describe('opencode-bridge prior-context priming', () => {
   async function loadBridge(
     settings: Record<string, unknown>,
     directory = '/proj',
+    mcpStatus: McpStatus = vi.fn(async () => mcpResponse({ cavemem: { status: 'connected' } })),
   ): Promise<{
     'experimental.chat.system.transform': SystemTransform;
     event: EventHook;
@@ -149,7 +174,11 @@ describe('opencode-bridge prior-context priming', () => {
       JSON.stringify({ embedding: { provider: 'none' }, ...settings }),
     );
     const mod = await import('../src/opencode-bridge.js');
-    const hooks = (await mod.default({ $: {} as never, directory })) as {
+    const hooks = (await mod.default({
+      $: {} as never,
+      client: { mcp: { status: mcpStatus } },
+      directory,
+    })) as {
       'experimental.chat.system.transform': SystemTransform;
       event: EventHook;
       close: () => void;
@@ -308,6 +337,102 @@ describe('opencode-bridge prior-context priming', () => {
     await prime(hooks);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('advertises memory tools only when the Cavemem MCP server is connected', async () => {
+    const status = vi.fn(async () => mcpResponse({ cavemem: { status: 'connected' } }));
+    const system = await prime(await loadBridge({}, '/proj', status));
+
+    expect(system).toContain(TOOLS_NOTICE);
+    expect(system).not.toContain(TOOLS_UNAVAILABLE);
+    expect(status).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['missing', {}],
+    ['failed', { cavemem: { status: 'failed', error: 'remote-super-secret' } }],
+    ['disabled', { cavemem: { status: 'disabled' } }],
+    ['auth-required', { cavemem: { status: 'needs_auth' } }],
+    ['client-registration-required', { cavemem: { status: 'needs_client_registration' } }],
+  ])('injects the fixed diagnostic when Cavemem MCP is %s', async (_name, data) => {
+    const status = vi.fn(async () => mcpResponse(data));
+    const system = await prime(await loadBridge({}, '/proj', status));
+
+    expect(system).toContain(TOOLS_UNAVAILABLE);
+    expect(system).not.toContain(TOOLS_NOTICE);
+    expect(system.join('\n')).not.toContain('remote-super-secret');
+  });
+
+  it('keeps capture and prior-context injection available when MCP tools are unavailable', async () => {
+    const childProcess = await import('node:child_process');
+    const spawnSpy = vi.spyOn(childProcess, 'spawn').mockImplementation(fakeChild);
+    const dbPath = join(home, 'data.db');
+    const seed = new MemoryStore({ dbPath, settings: defaultSettings });
+    seed.startSession({ id: 'old-1', ide: 'opencode', cwd: '/proj', metadata: null });
+    seed.endSession('old-1');
+    seed.storage.insertSummary({
+      session_id: 'old-1',
+      scope: 'session',
+      content: 'independent prior context',
+      compressed: false,
+      intensity: null,
+    });
+    seed.close();
+    const status = vi.fn(async () => mcpResponse({ cavemem: { status: 'failed' } }));
+    const hooks = await loadBridge({ dataDir: home }, '/proj', status);
+
+    await hooks.event({
+      event: {
+        type: 'session.created',
+        properties: { info: { id: 'ses-1', directory: '/proj' } },
+      },
+    });
+    const system = await prime(hooks);
+
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
+    expect(system).toContain(TOOLS_UNAVAILABLE);
+    expect(system).toContain('Prior context (internal): independent prior context');
+  });
+
+  it.each([
+    ['SDK error response', async () => mcpResponse(undefined, { message: 'remote-super-secret' })],
+    ['thrown API error', async () => Promise.reject(new Error('remote-super-secret'))],
+  ])('uses the fixed diagnostic for an %s', async (_name, implementation) => {
+    const status = vi.fn(implementation);
+    const system = await prime(await loadBridge({}, '/proj', status));
+
+    expect(system).toContain(TOOLS_UNAVAILABLE);
+    expect(system).not.toContain(TOOLS_NOTICE);
+    expect(system.join('\n')).not.toContain('remote-super-secret');
+  });
+
+  it('queries MCP status once per turn and resets when the next user message arrives', async () => {
+    const status = vi.fn(async () => mcpResponse({ cavemem: { status: 'connected' } }));
+    const hooks = await loadBridge({}, '/proj', status);
+
+    await prime(hooks);
+    await prime(hooks);
+    expect(status).toHaveBeenCalledTimes(1);
+
+    await hooks.event({
+      event: {
+        type: 'message.updated',
+        properties: { info: { id: 'msg-2', sessionID: 'ses-1', role: 'user' } },
+      },
+    });
+    await prime(hooks);
+
+    expect(status).toHaveBeenCalledTimes(2);
+
+    await hooks.event({
+      event: {
+        type: 'message.updated',
+        properties: { info: { id: 'msg-2', sessionID: 'ses-1', role: 'user' } },
+      },
+    });
+    await prime(hooks);
+
+    expect(status).toHaveBeenCalledTimes(2);
   });
 
   it('remote mode never creates the client-local data.db', async () => {
