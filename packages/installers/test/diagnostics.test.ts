@@ -184,6 +184,14 @@ describe('persisted capture interpreters', () => {
       ),
     ).toEqual({ event: 'stop' });
   });
+  it('recognizes an unquoted legacy Windows direct-JavaScript hook', () => {
+    expect(
+      fsUtils.parseCavememHook(
+        String.raw`C:\Users\Me\cavemem\index.js hook run stop --ide claude-code`,
+        'claude-code',
+      ),
+    ).toEqual({ event: 'stop' });
+  });
   describe.each([
     ['claude-code', '.claude/settings.json', true],
     ['codex', '.codex/hooks.json', true],
@@ -246,7 +254,26 @@ describe('persisted capture interpreters', () => {
         const hooks = existsSync(configPath)
           ? (JSON.parse(readFileSync(configPath, 'utf8')).hooks?.Stop ?? [])
           : [];
-        expect(JSON.stringify(hooks)).not.toContain(command);
+        const commands = grouped
+          ? hooks.flatMap((group: { hooks?: Array<{ command?: string }> }) => group.hooks ?? [])
+          : hooks;
+        expect(commands.map((hook: { command?: string }) => hook.command)).not.toContain(command);
+      },
+    );
+    it.each(['install', 'uninstall'] as const)(
+      '%s removes an unquoted legacy Windows direct-JavaScript Cavemem hook',
+      async (operation) => {
+        const command = String.raw`C:\Users\Me\cavemem\index.js hook run stop --ide ${ide}`;
+        write(file, makeConfig(command));
+        await getInstaller(ide)[operation](ctx);
+        const configPath = join(dir, file);
+        const hooks = existsSync(configPath)
+          ? (JSON.parse(readFileSync(configPath, 'utf8')).hooks?.Stop ?? [])
+          : [];
+        const commands = grouped
+          ? hooks.flatMap((group: { hooks?: Array<{ command?: string }> }) => group.hooks ?? [])
+          : hooks;
+        expect(commands.map((hook: { command?: string }) => hook.command)).not.toContain(command);
       },
     );
   });

@@ -37,7 +37,8 @@ export function writeJson(path: string, data: unknown): void {
  * because MSYS-bash (the shell Claude Code uses on Windows when launched
  * from the desktop app) treats unquoted backslashes as escape introducers
  * and strips them. Double-quoted, both cmd.exe and MSYS-bash preserve
- * backslashes verbatim.
+ * backslashes verbatim. The parser below accepts bare backslashes only to
+ * identify and remove commands written by older Cavemem releases.
  */
 export function shellQuote(p: string): string {
   if (/^[\w@%+=:,./-]+$/.test(p)) return p;
@@ -51,7 +52,7 @@ export function parseCavememHook(
 ): { nodeBin?: string; event: string } | undefined {
   if (typeof command !== 'string' || /[\r\n]/.test(command)) return undefined;
   const input = command.trim();
-  const token = /"((?:\\"|[^"])*)"|'([^']*)'|([\w@%+=:,./-]+)/y;
+  const token = /"((?:\\"|[^"])*)"|'([^']*)'|([\w@%+=:,./\\-]+)/y;
   const args: string[] = [];
   let offset = 0;
   while (offset < input.length) {
