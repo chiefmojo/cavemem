@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { diagnoseNodes, mcpNode } from './diagnostics.js';
 import { deepMerge, readJson, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
@@ -17,6 +18,9 @@ export const geminiCli: Installer = {
   id: 'gemini-cli',
   label: 'Gemini CLI',
   capture: 'none',
+  async diagnose(ctx) {
+    return diagnoseNodes('gemini-cli', ctx, [mcpNode(readJson(settingsFile(ctx), {}))]);
+  },
   captureNotes: 'no hooks system — MCP query only',
   async detect(ctx: InstallContext): Promise<boolean> {
     return existsSync(join(ctx.ideConfigDir, '.gemini'));

@@ -3,11 +3,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadSettings, resolveDataDir, settingsPath } from '@cavemem/config';
 import { spoolDepth, spoolPath } from '@cavemem/hooks';
-import { checkWindowsSh, codexMcpMode } from '@cavemem/installers';
+import { type IdeName, checkWindowsSh, codexMcpMode, installers } from '@cavemem/installers';
 import { Storage } from '@cavemem/storage';
 import type { Command } from 'commander';
 import kleur from 'kleur';
 import { checkedRemoteTarget, probeRemote } from '../util/remote.js';
+import { resolveCliPath, resolveNodePath } from '../util/resolve.js';
 import { formatSummaryCoverage } from '../util/summary-coverage.js';
 
 export function registerDoctorCommand(program: Command): void {
@@ -23,6 +24,23 @@ export function registerDoctorCommand(program: Command): void {
       const dir = resolveDataDir(settings.dataDir);
       process.stdout.write(`dataDir:  ${dir}\n`);
       const target = checkedRemoteTarget(settings);
+      const ctx = {
+        ideConfigDir: homedir(),
+        cliPath: resolveCliPath(),
+        nodeBin: resolveNodePath(),
+        dataDir: dir,
+        ...(target?.token ? { remote: { url: target.url, token: target.token } } : {}),
+      };
+      for (const [name, enabled] of Object.entries(settings.ides)) {
+        const installer = installers[name as IdeName];
+        if (!enabled || !installer) continue;
+        for (const diagnostic of await installer.diagnose(ctx)) {
+          process.stdout.write(
+            `${diagnostic.ide}: ${kleur.yellow(diagnostic.message)} — run \`${diagnostic.remedy}\`\n`,
+          );
+          if (diagnostic.code === 'node-missing') process.exitCode = 1;
+        }
+      }
       if (target) {
         process.stdout.write(`mode:     remote ${target.url}\n`);
         process.stdout.write(
@@ -58,19 +76,32 @@ export function registerDoctorCommand(program: Command): void {
         return;
       }
       const dbPath = join(dir, 'data.db');
-      try {
-        const s = new Storage(dbPath);
-        const sessions = s.listSessions(1).length;
-        const coverage = s.summaryCoverage();
-        s.close();
-        process.stdout.write(`db:       ${dbPath} ${kleur.green('ok')} (${sessions} sessions)\n`);
-        if (coverage.length > 0) {
-          // IDEs with sessions but zero turn summaries are losing turn_summary.
-          process.stdout.write(`summaries: ${formatSummaryCoverage(coverage)}\n`);
+      if (!existsSync(dbPath)) {
+        process.stdout.write(
+          `db:       ${dbPath} ${kleur.dim('none yet (no sessions captured)')}\n`,
+        );
+      } else {
+        let storage: Storage | undefined;
+        try {
+          storage = new Storage(dbPath, { readonly: true });
+          const sessions = storage.listSessions(1).length;
+          const coverage = storage.summaryCoverage();
+          process.stdout.write(`db:       ${dbPath} ${kleur.green('ok')} (${sessions} sessions)\n`);
+          if (coverage.length > 0) {
+            // IDEs with sessions but zero turn summaries are losing turn_summary.
+            process.stdout.write(`summaries: ${formatSummaryCoverage(coverage)}\n`);
+          }
+        } catch (err) {
+          const sqliteError = err as { code?: string; message?: string };
+          const message =
+            sqliteError.code === 'SQLITE_ERROR' && sqliteError.message?.includes('no such table')
+              ? 'schema out of date — run `cavemem reindex`'
+              : String(err);
+          process.stdout.write(`db:       ${dbPath} ${kleur.red('fail')} ${message}\n`);
+          process.exitCode = 1;
+        } finally {
+          storage?.close();
         }
-      } catch (err) {
-        process.stdout.write(`db:       ${dbPath} ${kleur.red('fail')} ${String(err)}\n`);
-        process.exitCode = 1;
       }
       process.stdout.write(`port:     ${settings.workerPort}\n`);
       process.stdout.write(`comp:     intensity=${settings.compression.intensity}\n`);

@@ -37,11 +37,68 @@ export function writeJson(path: string, data: unknown): void {
  * because MSYS-bash (the shell Claude Code uses on Windows when launched
  * from the desktop app) treats unquoted backslashes as escape introducers
  * and strips them. Double-quoted, both cmd.exe and MSYS-bash preserve
- * backslashes verbatim.
+ * backslashes verbatim. The parser below accepts bare backslashes only to
+ * identify and remove commands written by older Cavemem releases.
  */
 export function shellQuote(p: string): string {
   if (/^[\w@%+=:,./-]+$/.test(p)) return p;
   return `"${p.replace(/"/g, '\\"')}"`;
+}
+
+/** Recognize the launch tuple we emit; quoted argument text is never an invocation. */
+export function parseCavememHook(
+  command: unknown,
+  ide: string,
+): { nodeBin?: string; event: string } | undefined {
+  if (typeof command !== 'string' || /[\r\n]/.test(command)) return undefined;
+  const input = command.trim();
+  const token = /"((?:\\"|[^"])*)"|'([^']*)'|([\w@%+=:,./\\-]+)/y;
+  const args: string[] = [];
+  let offset = 0;
+  while (offset < input.length) {
+    token.lastIndex = offset;
+    const match = token.exec(input);
+    if (!match) return undefined;
+    // shellQuote escapes double quotes only. Keep Windows backslashes literal.
+    args.push(match[1]?.replace(/\\"/g, '"') ?? match[2] ?? match[3] ?? '');
+    offset = token.lastIndex;
+    if (offset < input.length && !/\s/.test(input[offset] ?? '')) return undefined;
+    while (offset < input.length && /\s/.test(input[offset] ?? '')) offset++;
+  }
+  if (args[0] === 'exec') args.shift();
+  let nodeBin: string | undefined;
+  let event: string | undefined;
+  if (
+    args.length === 7 &&
+    args[0] &&
+    args[1] &&
+    /^(?:.*[\\/])?node(?:\.exe)?$/i.test(args[0]) &&
+    args[2] === 'hook' &&
+    args[3] === 'run' &&
+    args[5] === '--ide' &&
+    args[6] === ide
+  ) {
+    nodeBin = args[0];
+    event = args[4];
+  } else if (
+    args.length === 6 &&
+    args[0] &&
+    /^(?:\/|[A-Za-z]:[\\/]|\\\\).+\.js$/i.test(args[0]) &&
+    args[1] === 'hook' &&
+    args[2] === 'run' &&
+    args[4] === '--ide' &&
+    args[5] === ide
+  ) {
+    event = args[3];
+  } else {
+    return undefined;
+  }
+  if (
+    !event ||
+    !['session-start', 'user-prompt-submit', 'post-tool-use', 'stop', 'session-end'].includes(event)
+  )
+    return undefined;
+  return nodeBin ? { nodeBin, event } : { event };
 }
 
 export function deepMerge<T>(base: T, add: Partial<T>): T {

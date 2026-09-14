@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
-import { readJson, shellQuote, writeFileSecure, writeJson } from './fs-utils.js';
+import { diagnoseNodes, hookNodes, mcpNode } from './diagnostics.js';
+import { parseCavememHook, readJson, shellQuote, writeFileSecure, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
 /**
@@ -82,8 +83,23 @@ function legacyConfigFile(ctx: InstallContext): string {
   return join(ctx.ideConfigDir, '.codex', 'config.json');
 }
 
-function isCavememHookGroup(group: CodexHookGroup, hookId: string): boolean {
-  return group.hooks.some((h) => h.type === 'command' && h.command.includes(`hook run ${hookId}`));
+function withoutCavememHooks(
+  ctx: InstallContext,
+  groups: CodexHookGroup[],
+  hookId: string,
+): CodexHookGroup[] {
+  return groups
+    .map((group) => ({
+      ...group,
+      hooks: group.hooks.filter((h) => {
+        const command =
+          (ctx.platform ?? process.platform) === 'win32' && typeof h.commandWindows === 'string'
+            ? h.commandWindows
+            : h.command;
+        return !(h.type === 'command' && parseCavememHook(command, 'codex')?.event === hookId);
+      }),
+    }))
+    .filter((group) => group.hooks.length > 0);
 }
 
 // smol-toml round-trips most config.toml shapes, but it does not support
@@ -109,6 +125,12 @@ export const codex: Installer = {
   id: 'codex',
   label: 'Codex CLI',
   capture: 'full',
+  async diagnose(ctx) {
+    return diagnoseNodes('codex', ctx, [
+      mcpNode(readToml(configFile(ctx)), 'mcp_servers'),
+      ...hookNodes(readJson(hooksFile(ctx), {}), ctx, 'codex'),
+    ]);
+  },
   captureNotes: 'no SessionEnd event',
   async detect(ctx: InstallContext): Promise<boolean> {
     return existsSync(join(ctx.ideConfigDir, '.codex'));
@@ -160,7 +182,7 @@ export const codex: Installer = {
 
     for (const [eventName, hookId, statusMessage] of HOOK_NAMES) {
       const existing = hookMap[eventName] ?? [];
-      const others = existing.filter((g) => !isCavememHookGroup(g, hookId));
+      const others = withoutCavememHooks(ctx, existing, hookId);
       // Codex uses `command` with Unix semantics and `commandWindows` on
       // native Windows; the base command string would otherwise be run with
       // assumptions that break a Windows `node.exe` + `.js` path. Only emit
@@ -212,7 +234,7 @@ export const codex: Installer = {
         for (const [eventName, hookId] of HOOK_NAMES) {
           const arr = hooks.hooks[eventName];
           if (!arr) continue;
-          const remaining = arr.filter((g) => !isCavememHookGroup(g, hookId));
+          const remaining = withoutCavememHooks(ctx, arr, hookId);
           if (remaining.length === 0) delete hooks.hooks[eventName];
           else hooks.hooks[eventName] = remaining;
         }

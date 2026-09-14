@@ -13,3 +13,4 @@ export {
 } from './windows-sh.js';
 export { codexMcpMode, codexWslWarning } from './codex.js';
 export { findForeignBridges } from './opencode.js';
+export type { InstallerDiagnostic } from './types.js';

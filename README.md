@@ -166,6 +166,8 @@ hooks running from a project directory would fragment the store per-project.
 
 Run `cavemem doctor` or `cavemem status` to see which directory is actually in use.
 
+`cavemem doctor` also checks enabled IDE integrations for missing Node interpreters and version-pinned Homebrew Cellar paths. It reports `cavemem install --ide <name>` to repair the affected integration; diagnosis leaves IDE configs unchanged. Reinstall records a stable absolute Node PATH link when it resolves to the running interpreter.
+
 | Key | Default | |
 |-----|---------|--|
 | `dataDir` | resolved cavemem home (above) | SQLite database, models, pidfile, logs — set this explicitly (e.g. `"~/.cavemem"`) to relocate just the data, independent of where `settings.json` lives. Only an explicit value is written to `settings.json`; the default is re-resolved on every load, so the file stays portable across machines |

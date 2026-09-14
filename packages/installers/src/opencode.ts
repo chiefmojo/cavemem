@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { diagnoseNodes, mcpNode } from './diagnostics.js';
 import { readJson, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
@@ -94,6 +95,12 @@ export const openCode: Installer = {
   id: 'opencode',
   label: 'OpenCode',
   capture: 'full',
+  async diagnose(ctx) {
+    return diagnoseNodes('opencode', ctx, [
+      mcpNode(readJson(configFile(ctx), {}), 'mcp'),
+      readJson<{ nodeBin?: unknown } | null>(bridgeMetaFile(ctx), {})?.nodeBin,
+    ]);
+  },
   captureNotes: 'via bundled bridge plugin, not hooks.json',
   async detect(ctx: InstallContext): Promise<boolean> {
     // Prefer the modern XDG path; fall back to the legacy dot-dir.

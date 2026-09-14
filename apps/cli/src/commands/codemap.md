@@ -2,6 +2,8 @@
 
 One module per `cavemem` subcommand (or small subcommand family). Each exports a `register*Command(program: Command)` function that attaches its command(s) to the root commander program; no module executes at import time.
 
+Installer contexts use `resolveNodePath()` to preserve stable Node PATH links. `doctor` calls each enabled installer's `diagnose(ctx)` in both local and remote mode and reports the IDE-specific reinstall remedy; a missing interpreter fails the command, while a version-pinned interpreter is advisory. Diagnosis never repairs configs. A missing local database is healthy before the first captured session; an existing database is opened with `readonly: true`, and an outdated schema reports the `cavemem reindex` remedy without mutating it. SQLite may manage WAL/SHM sidecars during reads.
+
 ## Responsibility
 
 Remote mode = `settings.remote.url` is set (the machine talks to a central cavemem server instead of a local store). Column values: **remote-aware** = branches on the remote target; **local-only** = refuses to run in remote mode; **mode-agnostic** = identical in both modes (remote dispatch happens below this layer).

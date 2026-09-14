@@ -3,7 +3,7 @@ import { loadSettings, resolveDataDir, saveSettings } from '@cavemem/config';
 import { type IdeName, getInstaller, installers } from '@cavemem/installers';
 import type { Command } from 'commander';
 import kleur from 'kleur';
-import { resolveCliPath } from '../util/resolve.js';
+import { resolveCliPath, resolveNodePath } from '../util/resolve.js';
 
 export function registerUninstallCommand(program: Command): void {
   program
@@ -18,7 +18,7 @@ export function registerUninstallCommand(program: Command): void {
       const msgs = await installer.uninstall({
         ideConfigDir: homedir(),
         cliPath: resolveCliPath(),
-        nodeBin: process.execPath,
+        nodeBin: resolveNodePath(),
         dataDir: resolveDataDir(settings.dataDir),
       });
       for (const m of msgs) process.stdout.write(`${kleur.yellow('·')} ${m}\n`);

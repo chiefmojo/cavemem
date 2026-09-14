@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { diagnoseNodes, mcpNode } from './diagnostics.js';
 import { deepMerge, readJson, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
@@ -15,6 +16,9 @@ export const antigravity: Installer = {
   id: 'antigravity',
   label: 'Antigravity',
   capture: 'none',
+  async diagnose(ctx) {
+    return diagnoseNodes('antigravity', ctx, [mcpNode(readJson(configFile(ctx), {}))]);
+  },
   captureNotes: 'no hooks system — MCP query only',
   async detect(ctx: InstallContext): Promise<boolean> {
     return existsSync(join(ctx.ideConfigDir, '.gemini', 'config'));
