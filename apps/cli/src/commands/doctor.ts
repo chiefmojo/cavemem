@@ -3,11 +3,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadSettings, resolveDataDir, settingsPath } from '@cavemem/config';
 import { spoolDepth, spoolPath } from '@cavemem/hooks';
-import { checkWindowsSh, codexMcpMode } from '@cavemem/installers';
+import { type IdeName, checkWindowsSh, codexMcpMode, installers } from '@cavemem/installers';
 import { Storage } from '@cavemem/storage';
 import type { Command } from 'commander';
 import kleur from 'kleur';
 import { checkedRemoteTarget, probeRemote } from '../util/remote.js';
+import { resolveCliPath, resolveNodePath } from '../util/resolve.js';
 import { formatSummaryCoverage } from '../util/summary-coverage.js';
 
 export function registerDoctorCommand(program: Command): void {
@@ -23,6 +24,23 @@ export function registerDoctorCommand(program: Command): void {
       const dir = resolveDataDir(settings.dataDir);
       process.stdout.write(`dataDir:  ${dir}\n`);
       const target = checkedRemoteTarget(settings);
+      const ctx = {
+        ideConfigDir: homedir(),
+        cliPath: resolveCliPath(),
+        nodeBin: resolveNodePath(),
+        dataDir: dir,
+        ...(target?.token ? { remote: { url: target.url, token: target.token } } : {}),
+      };
+      for (const [name, enabled] of Object.entries(settings.ides)) {
+        const installer = installers[name as IdeName];
+        if (!enabled || !installer) continue;
+        for (const diagnostic of await installer.diagnose(ctx)) {
+          process.stdout.write(
+            `${diagnostic.ide}: ${kleur.yellow(diagnostic.message)} — run \`${diagnostic.remedy}\`\n`,
+          );
+          process.exitCode = 1;
+        }
+      }
       if (target) {
         process.stdout.write(`mode:     remote ${target.url}\n`);
         process.stdout.write(
@@ -59,7 +77,8 @@ export function registerDoctorCommand(program: Command): void {
       }
       const dbPath = join(dir, 'data.db');
       try {
-        const s = new Storage(dbPath);
+        if (!existsSync(dbPath)) throw new Error('database does not exist');
+        const s = new Storage(dbPath, { readonly: true });
         const sessions = s.listSessions(1).length;
         const coverage = s.summaryCoverage();
         s.close();

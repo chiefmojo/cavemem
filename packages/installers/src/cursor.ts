@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { diagnoseNodes, mcpNode } from './diagnostics.js';
 import { deepMerge, readJson, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
@@ -16,6 +17,9 @@ export const cursor: Installer = {
   id: 'cursor',
   label: 'Cursor',
   capture: 'none',
+  async diagnose(ctx) {
+    return diagnoseNodes('cursor', ctx, [mcpNode(readJson(configFile(ctx), {}))]);
+  },
   captureNotes: 'no hooks system — MCP query only',
   async detect(ctx: InstallContext): Promise<boolean> {
     return existsSync(join(ctx.ideConfigDir, '.cursor'));

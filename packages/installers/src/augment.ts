@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { diagnoseNodes, hookNodes, mcpNode } from './diagnostics.js';
 import { deepMerge, readJson, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
@@ -79,6 +80,13 @@ export const augment: Installer = {
   id: 'augment',
   label: 'Augment Code',
   capture: 'full',
+  async diagnose(ctx) {
+    const config = readJson(settingsFile(ctx), {});
+    return diagnoseNodes('augment', ctx, [
+      mcpNode(config),
+      ...hookNodes(config, ctx, wrapperDir(ctx)),
+    ]);
+  },
   captureNotes: 'no UserPromptSubmit event',
   async detect(ctx: InstallContext): Promise<boolean> {
     return existsSync(augmentDir(ctx));

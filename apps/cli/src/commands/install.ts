@@ -11,7 +11,7 @@ import { type IdeName, checkWindowsSh, getInstaller, installers } from '@cavemem
 import type { Command } from 'commander';
 import kleur from 'kleur';
 import { checkedRemoteTarget } from '../util/remote.js';
-import { resolveCliPath } from '../util/resolve.js';
+import { resolveCliPath, resolveNodePath } from '../util/resolve.js';
 
 // Hooks run through Claude Code's own `sh -c` wrapper on Windows (#56).
 // Codex hooks aren't available on Windows at all, and the other installers
@@ -48,7 +48,7 @@ export function registerInstallCommand(program: Command): void {
       const ctx = {
         ideConfigDir: homedir(),
         cliPath: resolveCliPath(),
-        nodeBin: process.execPath,
+        nodeBin: resolveNodePath(),
         dataDir: resolveDataDir(settings.dataDir),
         ...(target?.token ? { remote: { url: target.url, token: target.token } } : {}),
       };

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
+import { diagnoseNodes, hookNodes, mcpNode } from './diagnostics.js';
 import { readJson, shellQuote, writeFileSecure, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
@@ -109,6 +110,12 @@ export const codex: Installer = {
   id: 'codex',
   label: 'Codex CLI',
   capture: 'full',
+  async diagnose(ctx) {
+    return diagnoseNodes('codex', ctx, [
+      mcpNode(readToml(configFile(ctx)), 'mcp_servers'),
+      ...hookNodes(readJson(hooksFile(ctx), {}), ctx),
+    ]);
+  },
   captureNotes: 'no SessionEnd event',
   async detect(ctx: InstallContext): Promise<boolean> {
     return existsSync(join(ctx.ideConfigDir, '.codex'));

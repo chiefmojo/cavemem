@@ -35,6 +35,14 @@ export interface InstallContext {
  */
 export type CaptureLevel = 'full' | 'partial' | 'none';
 
+/** Safe to display: deliberately excludes persisted paths, commands, and config values. */
+export interface InstallerDiagnostic {
+  ide: string;
+  code: 'node-missing' | 'node-fragile';
+  message: string;
+  remedy: string;
+}
+
 export interface Installer {
   id: string;
   label: string;
@@ -43,6 +51,7 @@ export interface Installer {
   /** Human-readable caveat about capture coverage, e.g. "no SessionEnd event". */
   captureNotes?: string;
   detect(ctx: InstallContext): Promise<boolean>;
+  diagnose(ctx: InstallContext): Promise<InstallerDiagnostic[]>;
   install(ctx: InstallContext): Promise<string[]>;
   uninstall(ctx: InstallContext): Promise<string[]>;
 }

@@ -1,5 +1,6 @@
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { diagnoseNodes, hookNodes, mcpNode } from './diagnostics.js';
 import { deepMerge, readJson, shellQuote, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
@@ -63,6 +64,12 @@ export const copilot: Installer = {
   id: 'copilot',
   label: 'GitHub Copilot',
   capture: 'full',
+  async diagnose(ctx) {
+    return diagnoseNodes('copilot', ctx, [
+      mcpNode(readJson(mcpFile(ctx), {}), 'servers'),
+      ...hookNodes(readJson(hooksFile(ctx), {}), ctx),
+    ]);
+  },
   captureNotes: 'no SessionEnd event',
   async detect(ctx: InstallContext): Promise<boolean> {
     return existsSync(join(ctx.ideConfigDir, '.copilot'));

@@ -4,6 +4,8 @@
 
 Implementation of the installer system: the `Installer` contract (`types.ts`), the nine-IDE registry (`registry.ts`), the per-IDE modules (`claude-code.ts`, `codex.ts`, `copilot.ts`, `augment.ts`, `opencode.ts`, `gemini-cli.ts`, `cursor.ts`, `antigravity.ts`, `bob.ts`), shared filesystem primitives (`fs-utils.ts`), and the Windows `sh` probe (`windows-sh.ts`).
 
+Every installer also implements read-only `diagnose(ctx)`, returning exported `InstallerDiagnostic` records for missing/unusable absolute Node commands and version-pinned Homebrew Cellar paths. `diagnostics.ts` inspects only Cavemem MCP entries and hook registrations (including Augment wrappers and the OpenCode sidecar); remote MCP entries have no interpreter to check, while capture hooks still do. Records carry the IDE, code, safe message, and exact reinstall remedy, never persisted command/config values. Only `install` repairs entries.
+
 ## Design
 
 - **`types.ts`** defines `InstallContext` (`ideConfigDir`, `cliPath`, `nodeBin`, `dataDir` — `nodeBin` exists because Windows can't exec a raw `.js`, EFTYPE; plus optional `platform: NodeJS.Platform` — defaults to `process.platform`, injectable so non-Windows CI can exercise win32-only behavior like Codex `commandWindows` emission; and optional `remote: { url, token }`, set by `apps/cli` when `settings.remote.url` is configured — installers then emit a URL-based MCP entry pointing at `<url>/mcp` instead of the local stdio spawn, while hook commands stay identical in both modes: the CLI decides at runtime whether to write locally or POST), `CaptureLevel` (`'full' | 'partial' | 'none'`, surfaced in `cavemem status` per issue #58), and the `Installer` interface (`detect`/`install`/`uninstall`, install/uninstall return `string[]` messages).

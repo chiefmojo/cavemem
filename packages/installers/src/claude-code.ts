@@ -1,6 +1,7 @@
 import { chmodSync, copyFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { diagnoseNodes, hookNodes, mcpNode } from './diagnostics.js';
 import { readJson, shellQuote, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
@@ -48,6 +49,12 @@ export const claudeCode: Installer = {
   id: 'claude-code',
   label: 'Claude Code',
   capture: 'full',
+  async diagnose(ctx) {
+    return diagnoseNodes('claude-code', ctx, [
+      mcpNode(readJson(mcpFile(ctx), {})),
+      ...hookNodes(readJson(settingsFile(ctx), {}), ctx),
+    ]);
+  },
   async detect(ctx: InstallContext): Promise<boolean> {
     return existsSync(join(ctx.ideConfigDir, '.claude'));
   },
