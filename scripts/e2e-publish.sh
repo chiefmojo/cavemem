@@ -73,6 +73,18 @@ test "$ACTUAL_VERSION" = "$EXPECTED_VERSION" || {
 }
 echo "$ACTUAL_VERSION"
 
+echo "==> 6b. published OpenCode bridge exposes only its plugin factory"
+BRIDGE="$PREFIX/lib/node_modules/@chiefmojo/cavemem/dist/opencodeBridge.js"
+test -f "$BRIDGE" || { echo "published OpenCode bridge missing"; exit 1; }
+BRIDGE="$BRIDGE" node --input-type=module -e '
+  import { pathToFileURL } from "node:url";
+  const exports = Object.keys(await import(pathToFileURL(process.env.BRIDGE).href));
+  if (exports.length !== 1 || exports[0] !== "default") {
+    console.error(`unexpected OpenCode bridge exports: ${exports.join(", ")}`);
+    process.exit(1);
+  }
+'
+
 echo "==> 7. install --ide claude-code"
 "$BIN" install --ide claude-code
 
