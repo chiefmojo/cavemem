@@ -17,7 +17,7 @@ import {
   classifySpawnFailure,
   hookSpawnCommand,
   resolveNodeBinary,
-} from '../src/opencode-bridge.js';
+} from '../src/opencode-bridge-helpers.js';
 
 type SystemTransform = (
   input: { sessionID?: string; model: unknown },
