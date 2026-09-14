@@ -44,6 +44,47 @@ export function shellQuote(p: string): string {
   return `"${p.replace(/"/g, '\\"')}"`;
 }
 
+/** Recognize the launch tuple we emit; quoted argument text is never an invocation. */
+export function parseCavememHook(
+  command: unknown,
+  ide: string,
+): { nodeBin: string; event: string } | undefined {
+  if (typeof command !== 'string' || /[\r\n]/.test(command)) return undefined;
+  const input = command.trim();
+  const token = /"((?:\\"|[^"])*)"|'([^']*)'|([\w@%+=:,./-]+)/y;
+  const args: string[] = [];
+  let offset = 0;
+  while (offset < input.length) {
+    token.lastIndex = offset;
+    const match = token.exec(input);
+    if (!match) return undefined;
+    // shellQuote escapes double quotes only. Keep Windows backslashes literal.
+    args.push(match[1]?.replace(/\\"/g, '"') ?? match[2] ?? match[3] ?? '');
+    offset = token.lastIndex;
+    if (offset < input.length && !/\s/.test(input[offset] ?? '')) return undefined;
+    while (offset < input.length && /\s/.test(input[offset] ?? '')) offset++;
+  }
+  if (args[0] === 'exec') args.shift();
+  if (
+    args.length !== 7 ||
+    !args[0] ||
+    !args[1] ||
+    args[2] !== 'hook' ||
+    args[3] !== 'run' ||
+    args[5] !== '--ide' ||
+    args[6] !== ide
+  )
+    return undefined;
+  if (!/^(?:.*[\\/])?node(?:\.exe)?$/i.test(args[0])) return undefined;
+  const event = args[4];
+  if (
+    !event ||
+    !['session-start', 'user-prompt-submit', 'post-tool-use', 'stop', 'session-end'].includes(event)
+  )
+    return undefined;
+  return { nodeBin: args[0], event };
+}
+
 export function deepMerge<T>(base: T, add: Partial<T>): T {
   const out = { ...(base as Record<string, unknown>) };
   for (const [k, v] of Object.entries(add as Record<string, unknown>)) {

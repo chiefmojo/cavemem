@@ -1,7 +1,7 @@
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { diagnoseNodes, hookNodes, mcpNode } from './diagnostics.js';
-import { deepMerge, readJson, shellQuote, writeJson } from './fs-utils.js';
+import { deepMerge, parseCavememHook, readJson, shellQuote, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
 interface CopilotHookEntry {
@@ -57,7 +57,7 @@ function mcpFile(ctx: InstallContext): string {
 }
 
 function isCavememHook(entry: CopilotHookEntry, hookId: string): boolean {
-  return entry.type === 'command' && entry.command.includes(`hook run ${hookId}`);
+  return entry.type === 'command' && parseCavememHook(entry.command, 'copilot')?.event === hookId;
 }
 
 export const copilot: Installer = {
@@ -67,7 +67,7 @@ export const copilot: Installer = {
   async diagnose(ctx) {
     return diagnoseNodes('copilot', ctx, [
       mcpNode(readJson(mcpFile(ctx), {}), 'servers'),
-      ...hookNodes(readJson(hooksFile(ctx), {}), ctx),
+      ...hookNodes(readJson(hooksFile(ctx), {}), ctx, 'copilot'),
     ]);
   },
   captureNotes: 'no SessionEnd event',

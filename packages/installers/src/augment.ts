@@ -89,7 +89,7 @@ export const augment: Installer = {
     const config = readJson(settingsFile(ctx), {});
     return diagnoseNodes('augment', ctx, [
       mcpNode(config),
-      ...hookNodes(config, ctx, wrapperDir(ctx)),
+      ...hookNodes(config, ctx, 'augment', wrapperDir(ctx)),
     ]);
   },
   captureNotes: 'no UserPromptSubmit event',

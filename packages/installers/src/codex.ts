@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { diagnoseNodes, hookNodes, mcpNode } from './diagnostics.js';
-import { readJson, shellQuote, writeFileSecure, writeJson } from './fs-utils.js';
+import { parseCavememHook, readJson, shellQuote, writeFileSecure, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
 /**
@@ -83,13 +83,21 @@ function legacyConfigFile(ctx: InstallContext): string {
   return join(ctx.ideConfigDir, '.codex', 'config.json');
 }
 
-function withoutCavememHooks(groups: CodexHookGroup[], hookId: string): CodexHookGroup[] {
+function withoutCavememHooks(
+  ctx: InstallContext,
+  groups: CodexHookGroup[],
+  hookId: string,
+): CodexHookGroup[] {
   return groups
     .map((group) => ({
       ...group,
-      hooks: group.hooks.filter(
-        (h) => !(h.type === 'command' && h.command.includes(`hook run ${hookId}`)),
-      ),
+      hooks: group.hooks.filter((h) => {
+        const command =
+          (ctx.platform ?? process.platform) === 'win32' && typeof h.commandWindows === 'string'
+            ? h.commandWindows
+            : h.command;
+        return !(h.type === 'command' && parseCavememHook(command, 'codex')?.event === hookId);
+      }),
     }))
     .filter((group) => group.hooks.length > 0);
 }
@@ -120,7 +128,7 @@ export const codex: Installer = {
   async diagnose(ctx) {
     return diagnoseNodes('codex', ctx, [
       mcpNode(readToml(configFile(ctx)), 'mcp_servers'),
-      ...hookNodes(readJson(hooksFile(ctx), {}), ctx),
+      ...hookNodes(readJson(hooksFile(ctx), {}), ctx, 'codex'),
     ]);
   },
   captureNotes: 'no SessionEnd event',
@@ -174,7 +182,7 @@ export const codex: Installer = {
 
     for (const [eventName, hookId, statusMessage] of HOOK_NAMES) {
       const existing = hookMap[eventName] ?? [];
-      const others = withoutCavememHooks(existing, hookId);
+      const others = withoutCavememHooks(ctx, existing, hookId);
       // Codex uses `command` with Unix semantics and `commandWindows` on
       // native Windows; the base command string would otherwise be run with
       // assumptions that break a Windows `node.exe` + `.js` path. Only emit
@@ -226,7 +234,7 @@ export const codex: Installer = {
         for (const [eventName, hookId] of HOOK_NAMES) {
           const arr = hooks.hooks[eventName];
           if (!arr) continue;
-          const remaining = withoutCavememHooks(arr, hookId);
+          const remaining = withoutCavememHooks(ctx, arr, hookId);
           if (remaining.length === 0) delete hooks.hooks[eventName];
           else hooks.hooks[eventName] = remaining;
         }

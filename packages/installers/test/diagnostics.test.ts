@@ -12,6 +12,8 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { shellQuote } from '../src/fs-utils.js';
+import * as fsUtils from '../src/fs-utils.js';
 import { type IdeName, getInstaller } from '../src/index.js';
 import type { InstallContext } from '../src/types.js';
 
@@ -154,6 +156,80 @@ describe.each(mcpCases)('%s interpreter diagnostics', (ide, file, key) => {
 });
 
 describe('persisted capture interpreters', () => {
+  it.each([
+    [
+      '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Me\\cavemem\\index.js" hook run stop --ide codex',
+      'codex',
+      'C:\\Program Files\\nodejs\\node.exe',
+    ],
+    [
+      '"/missing/with\\"quote/node" /opt/cavemem/index.js hook run stop --ide claude-code',
+      'claude-code',
+      '/missing/with"quote/node',
+    ],
+    ['exec "/old/node" "/old/cli.js" hook run stop --ide augment', 'augment', '/old/node'],
+  ])('decodes emitted command %s without losing the interpreter path', (command, ide, nodeBin) => {
+    expect(fsUtils.parseCavememHook(command, ide)).toEqual({ nodeBin, event: 'stop' });
+  });
+  it('does not claim an echo command that prints a Cavemem-shaped argument list', () => {
+    expect(
+      fsUtils.parseCavememHook('echo /tmp/report.js hook run stop --ide codex', 'codex'),
+    ).toBeUndefined();
+  });
+  describe.each([
+    ['claude-code', '.claude/settings.json', true],
+    ['codex', '.codex/hooks.json', true],
+    ['copilot', '.copilot/hooks/cavemem.json', false],
+  ] as const)('%s command ownership', (ide, file, grouped) => {
+    const makeConfig = (command: string) => ({
+      hooks: {
+        Stop: [
+          grouped
+            ? { matcher: 'user', hooks: [{ type: 'command', command }] }
+            : { type: 'command', command },
+        ],
+      },
+    });
+    it.each(['label', 'wrong-ide'] as const)(
+      'ignores foreign %s commands during diagnosis',
+      async (kind) => {
+        const command =
+          kind === 'label'
+            ? '/missing/node /tmp/user/report.js --label "hook run stop failed"'
+            : '/missing/node /tmp/user/report.js hook run stop --ide foreign-tool';
+        write(file, makeConfig(command));
+        expect(await getInstaller(ide).diagnose(ctx)).toEqual([]);
+      },
+    );
+    it.each(['install', 'uninstall'] as const)(
+      '%s preserves foreign commands containing hook text in an argument',
+      async (operation) => {
+        const command = '/missing/node /tmp/user/report.js --label "hook run stop failed"';
+        write(file, makeConfig(command));
+        await getInstaller(ide)[operation](ctx);
+        const hooks = JSON.parse(readFileSync(join(dir, file), 'utf8')).hooks.Stop;
+        expect(hooks).toContainEqual(
+          grouped
+            ? { matcher: 'user', hooks: [{ type: 'command', command }] }
+            : { type: 'command', command },
+        );
+      },
+    );
+    it('diagnoses an escaped double quote in a remote hook interpreter', async () => {
+      const node = join(dir, 'missing/with"quote/node');
+      write(
+        file,
+        makeConfig(`${shellQuote(node)} ${shellQuote(ctx.cliPath)} hook run stop --ide ${ide}`),
+      );
+      expect(
+        await getInstaller(ide).diagnose({
+          ...ctx,
+          remote: { url: 'http://localhost:37777', token: 'secret-token' },
+        }),
+      ).toEqual([expect.objectContaining({ code: 'node-missing', ide })]);
+    });
+  });
+
   describe.each([
     ['claude-code', '.claude/settings.json'],
     ['codex', '.codex/hooks.json'],

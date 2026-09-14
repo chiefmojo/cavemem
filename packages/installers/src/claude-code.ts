@@ -2,7 +2,7 @@ import { chmodSync, copyFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { diagnoseNodes, hookNodes, mcpNode } from './diagnostics.js';
-import { readJson, shellQuote, writeJson } from './fs-utils.js';
+import { parseCavememHook, readJson, shellQuote, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
 
 type ClaudeMcpEntry =
@@ -46,7 +46,8 @@ function withoutCavememHooks(entries: ClaudeHookEntry[], hookId: string): Claude
     .map((entry) => ({
       ...entry,
       hooks: entry.hooks.filter(
-        (h) => !(h.type === 'command' && h.command.includes(`hook run ${hookId}`)),
+        (h) =>
+          !(h.type === 'command' && parseCavememHook(h.command, 'claude-code')?.event === hookId),
       ),
     }))
     .filter((entry) => entry.hooks.length > 0);
@@ -59,7 +60,7 @@ export const claudeCode: Installer = {
   async diagnose(ctx) {
     return diagnoseNodes('claude-code', ctx, [
       mcpNode(readJson(mcpFile(ctx), {})),
-      ...hookNodes(readJson(settingsFile(ctx), {}), ctx),
+      ...hookNodes(readJson(settingsFile(ctx), {}), ctx, 'claude-code'),
     ]);
   },
   async detect(ctx: InstallContext): Promise<boolean> {

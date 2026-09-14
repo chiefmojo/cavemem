@@ -1,5 +1,6 @@
 import { constants, accessSync, readFileSync, statSync } from 'node:fs';
 import { dirname, posix, win32 } from 'node:path';
+import { parseCavememHook } from './fs-utils.js';
 import type { InstallContext, InstallerDiagnostic } from './types.js';
 
 function record(value: unknown): Record<string, unknown> {
@@ -16,25 +17,18 @@ export function mcpNode(config: unknown, key = 'mcpServers'): unknown {
   return Array.isArray(entry.command) ? entry.command[0] : entry.command;
 }
 
-function firstCommandToken(command: string): string | undefined {
-  const match = command.trim().match(/^(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"']+))/);
-  return match?.[1] ?? match?.[2] ?? match?.[3];
-}
-
 /** Inspect only hook registrations, never arbitrary user config or executable output. */
-export function hookNodes(config: unknown, ctx: InstallContext, wrapperDir?: string): string[] {
+export function hookNodes(
+  config: unknown,
+  ctx: InstallContext,
+  ide: string,
+  wrapperDir?: string,
+): string[] {
   const nodes: string[] = [];
   const platform = ctx.platform ?? process.platform;
   const addCommand = (value: unknown) => {
-    if (
-      typeof value !== 'string' ||
-      !/\bhook run (session-start|user-prompt-submit|post-tool-use|stop|session-end)(?:\s|$)/.test(
-        value,
-      )
-    )
-      return;
-    const node = firstCommandToken(value.replace(/^\s*exec\s+/, ''));
-    if (node) nodes.push(node);
+    const invocation = parseCavememHook(value, ide);
+    if (invocation) nodes.push(invocation.nodeBin);
   };
   for (const groups of Object.values(record(record(config).hooks))) {
     if (!Array.isArray(groups)) continue;
