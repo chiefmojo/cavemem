@@ -152,6 +152,7 @@ describe('opencode-bridge prior-context priming', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     for (const close of closers.splice(0)) {

@@ -16,14 +16,19 @@ describe('writeFakeOpenCode', () => {
     const home = mkdtempSync(join(tmpdir(), "cavemem-fake-opencode-o'pen-"));
     homes.push(home);
     const bin = writeFakeOpenCode(join(home, "path with 'quote'"));
+    const script = join(bin, 'opencode.mjs');
+    expect(readFileSync(script, 'utf8')).toContain("import { readFileSync } from 'node:fs';");
 
     if (process.platform === 'win32') {
-      expect(readFileSync(join(bin, 'opencode.cmd'), 'utf8')).toContain('%*');
+      const wrapper = readFileSync(join(bin, 'opencode.cmd'), 'utf8');
+      expect(wrapper).toContain('opencode.mjs');
+      expect(wrapper).toContain('%*');
       return;
     }
 
     const executable = join(bin, 'opencode');
     expect(readFileSync(executable, 'utf8')).toMatch(/^#!\/bin\/sh\n/);
+    expect(readFileSync(executable, 'utf8')).toContain('opencode.mjs');
     chmodSync(executable, 0o755);
 
     const result = spawnSync(executable, ['debug', 'config', '--pure'], {

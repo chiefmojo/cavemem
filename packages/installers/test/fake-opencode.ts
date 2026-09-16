@@ -8,7 +8,7 @@ function shellQuote(value: string): string {
 export function writeFakeOpenCode(home: string): string {
   const bin = join(home, 'fake-opencode-bin');
   mkdirSync(bin, { recursive: true });
-  const script = join(bin, 'opencode.js');
+  const script = join(bin, 'opencode.mjs');
   writeFileSync(
     script,
     [
