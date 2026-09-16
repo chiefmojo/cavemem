@@ -26,28 +26,34 @@ interface OpenCodeConfig {
   plugin?: string[];
 }
 
-const EFFECTIVE_CONFIG_UNAVAILABLE =
-  'OpenCode configuration verification failed: could not read effective configuration with `opencode debug config --pure`. Cavemem left other OpenCode configuration sources unchanged.';
-const EFFECTIVE_CONFIG_MISMATCH =
-  'OpenCode configuration verification failed: effective mcp.cavemem does not match the installed configuration. Cavemem left other OpenCode configuration sources unchanged. Inspect `opencode debug config --pure` and remove or update the shadowing entry.';
+function effectiveConfigUnavailableMessage(inspectionCwd: string): string {
+  return `warning: OpenCode MCP verification in ${inspectionCwd} could not read effective configuration with \`opencode debug config --pure\`. Cavemem installation completed; other OpenCode configuration sources were left unchanged.`;
+}
 
-function verifyEffectiveConfig(intended: OpenCodeMcpEntry): void {
+function effectiveConfigMismatchMessage(inspectionCwd: string): string {
+  return `warning: OpenCode MCP verification in ${inspectionCwd}: effective mcp.cavemem differs from the installed global entry. This may be an intentional project, managed, environment, or other configuration override; Cavemem left those sources unchanged.`;
+}
+
+function verifyEffectiveConfig(intended: OpenCodeMcpEntry, inspectionCwd: string): string {
   const result = spawnSync('opencode', ['debug', 'config', '--pure'], {
+    cwd: inspectionCwd,
     encoding: 'utf8',
     maxBuffer: 4 * 1024 * 1024,
     shell: process.platform === 'win32',
     timeout: 10_000,
     windowsHide: true,
   });
-  if (result.error || result.status !== 0) throw new Error(EFFECTIVE_CONFIG_UNAVAILABLE);
+  if (result.error || result.status !== 0) return effectiveConfigUnavailableMessage(inspectionCwd);
 
   let effective: unknown;
   try {
     effective = (JSON.parse(result.stdout) as { mcp?: { cavemem?: unknown } }).mcp?.cavemem;
   } catch {
-    throw new Error(EFFECTIVE_CONFIG_UNAVAILABLE);
+    return effectiveConfigUnavailableMessage(inspectionCwd);
   }
-  if (!isDeepStrictEqual(effective, intended)) throw new Error(EFFECTIVE_CONFIG_MISMATCH);
+  if (!isDeepStrictEqual(effective, intended)) return effectiveConfigMismatchMessage(inspectionCwd);
+
+  return `verified effective OpenCode MCP configuration in ${inspectionCwd}`;
 }
 
 function configRoot(ctx: InstallContext): string {
@@ -216,8 +222,8 @@ export const openCode: Installer = {
       }
     }
 
-    verifyEffectiveConfig(entry);
-    messages.push('verified effective OpenCode MCP configuration');
+    const inspectionCwd = process.cwd();
+    messages.push(verifyEffectiveConfig(entry, inspectionCwd));
 
     return messages;
   },

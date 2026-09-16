@@ -28,7 +28,7 @@ interface PluginInput {
   $: BunShell;
   client: {
     mcp: {
-      status: () => Promise<{
+      status: (input: { query: { directory: string } }) => Promise<{
         data?: Record<string, { status?: string }>;
         error?: unknown;
       }>;
@@ -70,6 +70,9 @@ function errorName(err: unknown): string {
 }
 
 const LOG_PATH = join(tmpdir(), 'cavemem-bridge-errors.log');
+const MCP_STATUS_TIMEOUT_MS = 250;
+
+type McpAvailability = 'connected' | 'unavailable' | 'unknown';
 
 function log(msg: string): void {
   try {
@@ -95,7 +98,9 @@ export default async function cavememBridge({ client, directory }: PluginInput):
   const TOOLS_NOTICE =
     'You have cavemem memory tools (search, timeline, get_observations, list_sessions). Use them when past context would help.';
   const TOOLS_UNAVAILABLE =
-    'Cavemem memory tools are unavailable in this OpenCode session. Run `cavemem install --ide opencode`, then restart OpenCode.';
+    'Cavemem memory tools are unavailable in this OpenCode session because the Cavemem MCP connection is not available.';
+  const TOOLS_STATUS_UNKNOWN =
+    'Cavemem memory tool availability could not be determined for this OpenCode session.';
 
   // Resolve node on every platform: a `.js` CLI needs a runtime everywhere, and
   // on POSIX the `#!/usr/bin/env node` shebang searches the same inherited PATH
@@ -153,7 +158,7 @@ export default async function cavememBridge({ client, directory }: PluginInput):
   // One status request per turn. The next user message starts a new turn and
   // clears this promise; sharing the in-flight promise also deduplicates
   // concurrent system transforms.
-  const mcpStatusBySession = new Map<string, Promise<boolean>>();
+  const mcpStatusBySession = new Map<string, Promise<McpAvailability>>();
   // Accumulate assistant message text by message ID.
   const messageTexts = new Map<string, { sessionID: string; text: string }>();
   // Track the latest user message per session so repeated updates for the same
@@ -311,20 +316,49 @@ export default async function cavememBridge({ client, directory }: PluginInput):
     }
   }
 
-  function cavememToolsConnected(sessionID: string): Promise<boolean> {
+  function cavememToolsAvailability(sessionID: string): Promise<McpAvailability> {
     const cached = mcpStatusBySession.get(sessionID);
     if (cached) return cached;
     const status = (async () => {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      let timedOut = false;
       try {
-        const result = await client.mcp.status();
-        if (result.error) {
-          log('MCP status unavailable: SDK error response');
-          return false;
-        }
-        return result.data?.cavemem?.status === 'connected';
-      } catch (err) {
-        log(`MCP status unavailable: ${errorName(err)}`);
-        return false;
+        return await Promise.race([
+          Promise.resolve()
+            .then(() => client.mcp.status({ query: { directory } }))
+            .then((result): McpAvailability => {
+              if (result.error) {
+                log('MCP status unavailable: SDK error response');
+                return 'unknown';
+              }
+              switch (result.data?.cavemem?.status) {
+                case 'connected':
+                  return 'connected';
+                case undefined:
+                case 'failed':
+                case 'disabled':
+                case 'needs_auth':
+                case 'needs_client_registration':
+                  return 'unavailable';
+                default:
+                  log('MCP status unavailable: unrecognized status');
+                  return 'unknown';
+              }
+            })
+            .catch((err): McpAvailability => {
+              if (!timedOut) log(`MCP status unavailable: ${errorName(err)}`);
+              return 'unknown';
+            }),
+          new Promise<McpAvailability>((resolve) => {
+            timeout = setTimeout(() => {
+              timedOut = true;
+              log('MCP status unavailable: timeout');
+              resolve('unknown');
+            }, MCP_STATUS_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        if (timeout) clearTimeout(timeout);
       }
     })();
     mcpStatusBySession.set(sessionID, status);
@@ -500,7 +534,14 @@ export default async function cavememBridge({ client, directory }: PluginInput):
         }
         const sid = input?.sessionID;
         if (!sid) return;
-        output.system.push((await cavememToolsConnected(sid)) ? TOOLS_NOTICE : TOOLS_UNAVAILABLE);
+        const availability = await cavememToolsAvailability(sid);
+        output.system.push(
+          availability === 'connected'
+            ? TOOLS_NOTICE
+            : availability === 'unavailable'
+              ? TOOLS_UNAVAILABLE
+              : TOOLS_STATUS_UNKNOWN,
+        );
         const context = await getRecentContext(sid);
         if (context) {
           output.system.push(context);

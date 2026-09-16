@@ -28,7 +28,7 @@ type EventHook = (input: {
   event: { type: string; properties?: Record<string, unknown> };
 }) => Promise<void>;
 
-type McpStatus = () => Promise<{
+type McpStatus = (input: { query: { directory: string } }) => Promise<{
   data?: Record<string, { status: string }>;
   error?: unknown;
   request: Request;
@@ -50,7 +50,9 @@ function mcpResponse(
 const TOOLS_NOTICE =
   'You have cavemem memory tools (search, timeline, get_observations, list_sessions). Use them when past context would help.';
 const TOOLS_UNAVAILABLE =
-  'Cavemem memory tools are unavailable in this OpenCode session. Run `cavemem install --ide opencode`, then restart OpenCode.';
+  'Cavemem memory tools are unavailable in this OpenCode session because the Cavemem MCP connection is not available.';
+const TOOLS_STATUS_UNKNOWN =
+  'Cavemem memory tool availability could not be determined for this OpenCode session.';
 
 /** Minimal ChildProcess shape the bridge's fire-and-forget runHook touches. */
 function fakeChild(): ChildProcess {
@@ -345,7 +347,9 @@ describe('opencode-bridge prior-context priming', () => {
 
     expect(system).toContain(TOOLS_NOTICE);
     expect(system).not.toContain(TOOLS_UNAVAILABLE);
+    expect(system).not.toContain(TOOLS_STATUS_UNKNOWN);
     expect(status).toHaveBeenCalledTimes(1);
+    expect(status).toHaveBeenCalledWith({ query: { directory: '/proj' } });
   });
 
   it.each([
@@ -360,7 +364,9 @@ describe('opencode-bridge prior-context priming', () => {
 
     expect(system).toContain(TOOLS_UNAVAILABLE);
     expect(system).not.toContain(TOOLS_NOTICE);
+    expect(system).not.toContain(TOOLS_STATUS_UNKNOWN);
     expect(system.join('\n')).not.toContain('remote-super-secret');
+    expect(system.join('\n')).not.toContain('cavemem install');
   });
 
   it('keeps capture and prior-context injection available when MCP tools are unavailable', async () => {
@@ -397,13 +403,53 @@ describe('opencode-bridge prior-context priming', () => {
   it.each([
     ['SDK error response', async () => mcpResponse(undefined, { message: 'remote-super-secret' })],
     ['thrown API error', async () => Promise.reject(new Error('remote-super-secret'))],
-  ])('uses the fixed diagnostic for an %s', async (_name, implementation) => {
+  ])('uses the neutral diagnostic for an %s', async (_name, implementation) => {
     const status = vi.fn(implementation);
     const system = await prime(await loadBridge({}, '/proj', status));
 
-    expect(system).toContain(TOOLS_UNAVAILABLE);
+    expect(system).toContain(TOOLS_STATUS_UNKNOWN);
+    expect(system).not.toContain(TOOLS_UNAVAILABLE);
     expect(system).not.toContain(TOOLS_NOTICE);
     expect(system.join('\n')).not.toContain('remote-super-secret');
+    expect(system.join('\n')).not.toContain('cavemem install');
+  });
+
+  it('uses a bounded status check and retains its neutral result for the current turn', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const status = vi.fn(() => {
+      calls += 1;
+      return calls === 1
+        ? new Promise<Awaited<ReturnType<McpStatus>>>(() => {})
+        : Promise.resolve(mcpResponse({ cavemem: { status: 'connected' } }));
+    });
+    const hooks = await loadBridge({}, '/proj', status);
+    const firstOutput = { system: [] as string[] };
+    const secondOutput = { system: [] as string[] };
+    const first = hooks['experimental.chat.system.transform'](
+      { sessionID: 'ses-1', model: {} },
+      firstOutput,
+    );
+    const second = hooks['experimental.chat.system.transform'](
+      { sessionID: 'ses-1', model: {} },
+      secondOutput,
+    );
+
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+
+    expect(firstOutput.system).toContain(TOOLS_STATUS_UNKNOWN);
+    expect(secondOutput.system).toContain(TOOLS_STATUS_UNKNOWN);
+    expect(status).toHaveBeenCalledTimes(1);
+
+    await hooks.event({
+      event: {
+        type: 'message.updated',
+        properties: { info: { id: 'msg-2', sessionID: 'ses-1', role: 'user' } },
+      },
+    });
+    await prime(hooks);
+    expect(status).toHaveBeenCalledTimes(2);
   });
 
   it('queries MCP status once per turn and resets when the next user message arrives', async () => {

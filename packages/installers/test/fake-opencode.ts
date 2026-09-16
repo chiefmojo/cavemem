@@ -1,6 +1,10 @@
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 export function writeFakeOpenCode(home: string): string {
   const bin = join(home, 'fake-opencode-bin');
   mkdirSync(bin, { recursive: true });
@@ -19,7 +23,10 @@ export function writeFakeOpenCode(home: string): string {
     writeFileSync(join(bin, 'opencode.cmd'), `@"${process.execPath}" "${script}" %*\r\n`);
   } else {
     const executable = join(bin, 'opencode');
-    writeFileSync(executable, `#!${process.execPath}\nimport './opencode.js';\n`);
+    writeFileSync(
+      executable,
+      `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(script)} "$@"\n`,
+    );
     chmodSync(executable, 0o755);
   }
   return bin;
