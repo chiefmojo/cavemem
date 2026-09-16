@@ -68,7 +68,7 @@ Remote mode lets one central worker own the memory store for agents on multiple 
 | Antigravity | — | ✓ | query-only — no hooks system |
 | IBM Bob | — | ✓ | query-only — no hooks system |
 
-¹ OpenCode has no `hooks.json`-style event system. Capture instead goes through a bundled bridge plugin (`opencodeBridge.js`, symlinked into OpenCode's plugin dir on install) that subscribes to OpenCode's native `event` and `tool.execute.after` hooks and shells out to the same `cavemem hook run` handlers every other IDE uses — same lifecycle coverage, different wiring.
+¹ OpenCode has no `hooks.json`-style event system. Capture instead goes through a bundled bridge plugin (`opencodeBridge.js`, symlinked into OpenCode's plugin dir on install) that subscribes to OpenCode's native `event` and `tool.execute.after` hooks and shells out to the same `cavemem hook run` handlers every other IDE uses — same lifecycle coverage, different wiring. Install verifies the effective merged OpenCode MCP configuration, and the bridge advertises memory tools only while Cavemem's MCP connection is confirmed available. A confirmed unavailable connection gets a declarative diagnostic; a transient status error or timeout gets a neutral diagnostic rather than an installation instruction.
 
 ² Copilot's and Codex's hook payloads are close enough to Claude Code's shape that the same handlers are reused unmodified, but neither event set is complete: Codex and Copilot have no `SessionEnd`, and Augment has no `UserPromptSubmit`. Every other lifecycle moment still fires and gets written.
 

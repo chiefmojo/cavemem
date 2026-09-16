@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
@@ -10,6 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { diagnoseNodes, mcpNode } from './diagnostics.js';
 import { readJson, writeJson } from './fs-utils.js';
 import type { InstallContext, Installer } from './types.js';
@@ -22,6 +24,36 @@ interface OpenCodeConfig {
   mcp?: Record<string, OpenCodeMcpEntry>;
   mcpServers?: Record<string, { command: string; args?: string[] }>;
   plugin?: string[];
+}
+
+function effectiveConfigUnavailableMessage(inspectionCwd: string): string {
+  return `warning: OpenCode MCP verification in ${inspectionCwd} could not read effective configuration with \`opencode debug config --pure\`. Cavemem installation completed; other OpenCode configuration sources were left unchanged.`;
+}
+
+function effectiveConfigMismatchMessage(inspectionCwd: string): string {
+  return `warning: OpenCode MCP verification in ${inspectionCwd}: effective mcp.cavemem differs from the installed global entry. This may be an intentional project, managed, environment, or other configuration override; Cavemem left those sources unchanged.`;
+}
+
+function verifyEffectiveConfig(intended: OpenCodeMcpEntry, inspectionCwd: string): string {
+  const result = spawnSync('opencode', ['debug', 'config', '--pure'], {
+    cwd: inspectionCwd,
+    encoding: 'utf8',
+    maxBuffer: 4 * 1024 * 1024,
+    shell: process.platform === 'win32',
+    timeout: 10_000,
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) return effectiveConfigUnavailableMessage(inspectionCwd);
+
+  let effective: unknown;
+  try {
+    effective = (JSON.parse(result.stdout) as { mcp?: { cavemem?: unknown } }).mcp?.cavemem;
+  } catch {
+    return effectiveConfigUnavailableMessage(inspectionCwd);
+  }
+  if (!isDeepStrictEqual(effective, intended)) return effectiveConfigMismatchMessage(inspectionCwd);
+
+  return `verified effective OpenCode MCP configuration in ${inspectionCwd}`;
 }
 
 function configRoot(ctx: InstallContext): string {
@@ -189,6 +221,9 @@ export const openCode: Installer = {
         // Ignore parse errors in legacy config — not our file anymore.
       }
     }
+
+    const inspectionCwd = process.cwd();
+    messages.push(verifyEffectiveConfig(entry, inspectionCwd));
 
     return messages;
   },

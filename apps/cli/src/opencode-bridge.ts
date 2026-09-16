@@ -26,6 +26,14 @@ type BunShell = (
 
 interface PluginInput {
   $: BunShell;
+  client: {
+    mcp: {
+      status: (input: { query: { directory: string } }) => Promise<{
+        data?: Record<string, { status?: string }>;
+        error?: unknown;
+      }>;
+    };
+  };
   directory: string;
 }
 
@@ -62,6 +70,9 @@ function errorName(err: unknown): string {
 }
 
 const LOG_PATH = join(tmpdir(), 'cavemem-bridge-errors.log');
+const MCP_STATUS_TIMEOUT_MS = 250;
+
+type McpAvailability = 'connected' | 'unavailable' | 'unknown';
 
 function log(msg: string): void {
   try {
@@ -77,13 +88,19 @@ function log(msg: string): void {
 // Plugin
 /* ------------------------------------------------------------------ */
 
-export default async function cavememBridge({ directory }: PluginInput): Promise<Hooks> {
+export default async function cavememBridge({ client, directory }: PluginInput): Promise<Hooks> {
   const CAVEMEM = resolveCavememCli();
 
   const NODE_UNAVAILABLE_MSG =
     "Cavemem memory capture is disabled: no usable Node.js runtime was found, so new sessions will not be saved. Install Node.js 20+ and make sure it is on OpenCode's PATH (or rerun `cavemem install --ide opencode`), then restart OpenCode.";
   const CLI_NOT_FOUND_MSG =
     "Cavemem memory capture is disabled: the cavemem CLI could not be found, so new sessions will not be saved. Reinstall with `cavemem install --ide opencode` (or verify cavemem is on OpenCode's PATH), then restart OpenCode.";
+  const TOOLS_NOTICE =
+    'You have cavemem memory tools (search, timeline, get_observations, list_sessions). Use them when past context would help.';
+  const TOOLS_UNAVAILABLE =
+    'Cavemem memory tools are unavailable in this OpenCode session because the Cavemem MCP connection is not available.';
+  const TOOLS_STATUS_UNKNOWN =
+    'Cavemem memory tool availability could not be determined for this OpenCode session.';
 
   // Resolve node on every platform: a `.js` CLI needs a runtime everywhere, and
   // on POSIX the `#!/usr/bin/env node` shebang searches the same inherited PATH
@@ -138,10 +155,15 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
   const activeSessions = new Set<string>();
   // Track which sessions already received retrieved context.
   const queriedSessions = new Set<string>();
+  // One status request per turn. The next user message starts a new turn and
+  // clears this promise; sharing the in-flight promise also deduplicates
+  // concurrent system transforms.
+  const mcpStatusBySession = new Map<string, Promise<McpAvailability>>();
   // Accumulate assistant message text by message ID.
   const messageTexts = new Map<string, { sessionID: string; text: string }>();
-  // Track which message IDs are user messages (for prompt capture).
-  const userMessageIds = new Set<string>();
+  // Track the latest user message per session so repeated updates for the same
+  // prompt do not start extra turns or duplicate MCP status requests.
+  const lastUserMessageBySession = new Map<string, string>();
 
   // Prior-session priming source. Remote mode: prime from the worker via
   // /api/context — the client-local data.db is empty/stale here (WP #222),
@@ -294,6 +316,55 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
     }
   }
 
+  function cavememToolsAvailability(sessionID: string): Promise<McpAvailability> {
+    const cached = mcpStatusBySession.get(sessionID);
+    if (cached) return cached;
+    const status = (async () => {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      let timedOut = false;
+      try {
+        return await Promise.race([
+          Promise.resolve()
+            .then(() => client.mcp.status({ query: { directory } }))
+            .then((result): McpAvailability => {
+              if (result.error) {
+                log('MCP status unavailable: SDK error response');
+                return 'unknown';
+              }
+              switch (result.data?.cavemem?.status) {
+                case 'connected':
+                  return 'connected';
+                case undefined:
+                case 'failed':
+                case 'disabled':
+                case 'needs_auth':
+                case 'needs_client_registration':
+                  return 'unavailable';
+                default:
+                  log('MCP status unavailable: unrecognized status');
+                  return 'unknown';
+              }
+            })
+            .catch((err): McpAvailability => {
+              if (!timedOut) log(`MCP status unavailable: ${errorName(err)}`);
+              return 'unknown';
+            }),
+          new Promise<McpAvailability>((resolve) => {
+            timeout = setTimeout(() => {
+              timedOut = true;
+              log('MCP status unavailable: timeout');
+              resolve('unknown');
+            }, MCP_STATUS_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    })();
+    mcpStatusBySession.set(sessionID, status);
+    return status;
+  }
+
   return {
     close: () => {
       try {
@@ -332,6 +403,8 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
             }
             activeSessions.delete(sid);
             queriedSessions.delete(sid);
+            mcpStatusBySession.delete(sid);
+            lastUserMessageBySession.delete(sid);
             await runHook('session-end', { session_id: sid });
             break;
           }
@@ -344,6 +417,8 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
             }
             activeSessions.delete(session.id);
             queriedSessions.delete(session.id);
+            mcpStatusBySession.delete(session.id);
+            lastUserMessageBySession.delete(session.id);
             await runHook('session-end', {
               session_id: session.id,
             });
@@ -412,7 +487,10 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
             if (!sid || !mid) return;
 
             if (info.role === 'user') {
-              userMessageIds.add(mid);
+              if (lastUserMessageBySession.get(sid) !== mid) {
+                mcpStatusBySession.delete(sid);
+                lastUserMessageBySession.set(sid, mid);
+              }
               const buffered = messageTexts.get(mid);
               const text = info.summary?.body || buffered?.text || '';
               messageTexts.delete(mid);
@@ -456,8 +534,13 @@ export default async function cavememBridge({ directory }: PluginInput): Promise
         }
         const sid = input?.sessionID;
         if (!sid) return;
+        const availability = await cavememToolsAvailability(sid);
         output.system.push(
-          'You have cavemem memory tools (search, timeline, get_observations, list_sessions). Use them when past context would help.',
+          availability === 'connected'
+            ? TOOLS_NOTICE
+            : availability === 'unavailable'
+              ? TOOLS_UNAVAILABLE
+              : TOOLS_STATUS_UNKNOWN,
         );
         const context = await getRecentContext(sid);
         if (context) {

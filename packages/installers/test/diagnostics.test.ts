@@ -10,12 +10,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { shellQuote } from '../src/fs-utils.js';
 import * as fsUtils from '../src/fs-utils.js';
 import { type IdeName, getInstaller } from '../src/index.js';
 import type { InstallContext } from '../src/types.js';
+import { writeFakeOpenCode } from './fake-opencode.js';
 
 let dir: string;
 let ctx: InstallContext;
@@ -34,6 +35,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'cavemem-diagnose-'));
   vi.stubEnv('XDG_CONFIG_HOME', join(dir, '.config'));
   vi.stubEnv('APPDATA', join(dir, 'AppData/Roaming'));
+  vi.stubEnv('PATH', `${writeFakeOpenCode(dir)}${delimiter}${process.env.PATH ?? ''}`);
   ctx = {
     ideConfigDir: dir,
     cliPath: join(dir, 'cli/index.js'),
