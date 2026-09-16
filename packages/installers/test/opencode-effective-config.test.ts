@@ -20,6 +20,8 @@ describe('OpenCode effective configuration verification', () => {
     originalXdg = process.env.XDG_CONFIG_HOME;
     originalOutput = process.env.FAKE_OPENCODE_OUTPUT;
     originalFailure = process.env.FAKE_OPENCODE_FAILURE;
+    delete process.env.FAKE_OPENCODE_OUTPUT;
+    delete process.env.FAKE_OPENCODE_FAILURE;
     process.env.XDG_CONFIG_HOME = join(home, '.config');
 
     const fakeDist = join(home, 'cavemem', 'dist');
@@ -50,9 +52,9 @@ describe('OpenCode effective configuration verification', () => {
   });
 
   it('accepts the effective local MCP entry written by the installer', async () => {
-    await expect(openCode.install(ctx)).resolves.toContain(
-      'verified effective OpenCode MCP configuration',
-    );
+    const messages = await openCode.install(ctx);
+
+    expect(messages).toContain(`verified effective OpenCode MCP configuration in ${process.cwd()}`);
   });
 
   it('accepts the effective remote MCP entry without exposing its token', async () => {
@@ -62,11 +64,11 @@ describe('OpenCode effective configuration verification', () => {
       remote: { url: 'https://memory.example', token },
     });
 
-    expect(messages).toContain('verified effective OpenCode MCP configuration');
+    expect(messages).toContain(`verified effective OpenCode MCP configuration in ${process.cwd()}`);
     expect(messages.join('\n')).not.toContain(token);
   });
 
-  it('rejects a shadowed entry and preserves project and unrelated global configuration', async () => {
+  it('warns about a shadowed entry and preserves project and unrelated global configuration', async () => {
     const projectConfig = join(home, 'project-opencode.json');
     writeFileSync(projectConfig, '{"mcp":{"cavemem":{"enabled":false}},"keep":"project"}\n');
     mkdirSync(join(home, '.config', 'opencode'), { recursive: true });
@@ -75,10 +77,15 @@ describe('OpenCode effective configuration verification', () => {
       '{"theme":"dark","mcp":{"other":{"type":"local","command":["echo"]}}}\n',
     );
     process.env.FAKE_OPENCODE_OUTPUT = JSON.stringify({
-      mcp: { cavemem: { type: 'local', command: ['shadowed'], enabled: false } },
+      mcp: { cavemem: { type: 'local', command: ['remote-super-secret'], enabled: false } },
     });
 
-    await expect(openCode.install(ctx)).rejects.toThrow(/effective mcp\.cavemem does not match/);
+    const messages = await openCode.install(ctx);
+
+    expect(messages).toContain(
+      `warning: OpenCode MCP verification in ${process.cwd()}: effective mcp.cavemem differs from the installed global entry. This may be an intentional project, managed, environment, or other configuration override; Cavemem left those sources unchanged.`,
+    );
+    expect(messages.join('\n')).not.toContain('remote-super-secret');
 
     expect(readFileSync(projectConfig, 'utf8')).toContain('"keep":"project"');
     const global = JSON.parse(
@@ -88,25 +95,38 @@ describe('OpenCode effective configuration verification', () => {
     expect(global.mcp.other).toBeDefined();
   });
 
-  it('rejects malformed debug output without echoing it', async () => {
+  it('warns about malformed debug output without echoing it', async () => {
     process.env.FAKE_OPENCODE_OUTPUT = 'not-json remote-super-secret';
 
-    const promise = openCode.install(ctx);
-    await expect(promise).rejects.toThrow(/could not read effective configuration/);
-    await expect(promise).rejects.not.toThrow(/remote-super-secret/);
+    const messages = await openCode.install(ctx);
+
+    expect(messages).toContain(
+      `warning: OpenCode MCP verification in ${process.cwd()} could not read effective configuration with \`opencode debug config --pure\`. Cavemem installation completed; other OpenCode configuration sources were left unchanged.`,
+    );
+    expect(messages.join('\n')).not.toContain('remote-super-secret');
   });
 
-  it('rejects a failed debug command without echoing stderr', async () => {
+  it('warns about a failed debug command without echoing stderr', async () => {
     process.env.FAKE_OPENCODE_FAILURE = 'remote-super-secret';
 
-    const promise = openCode.install(ctx);
-    await expect(promise).rejects.toThrow(/could not read effective configuration/);
-    await expect(promise).rejects.not.toThrow(/remote-super-secret/);
+    const messages = await openCode.install(ctx);
+
+    expect(messages).toContain(
+      `warning: OpenCode MCP verification in ${process.cwd()} could not read effective configuration with \`opencode debug config --pure\`. Cavemem installation completed; other OpenCode configuration sources were left unchanged.`,
+    );
+    expect(messages.join('\n')).not.toContain('remote-super-secret');
   });
 
-  it('rejects an unavailable OpenCode command with a reinstall-safe diagnostic', async () => {
+  it('warns when the OpenCode command is unavailable after completing the install', async () => {
     process.env.PATH = join(home, 'missing-bin');
 
-    await expect(openCode.install(ctx)).rejects.toThrow(/could not read effective configuration/);
+    const messages = await openCode.install(ctx);
+
+    expect(messages).toContain(
+      `warning: OpenCode MCP verification in ${process.cwd()} could not read effective configuration with \`opencode debug config --pure\`. Cavemem installation completed; other OpenCode configuration sources were left unchanged.`,
+    );
+    expect(readFileSync(join(home, '.config', 'opencode', 'opencode.json'), 'utf8')).toContain(
+      '"cavemem"',
+    );
   });
 });
