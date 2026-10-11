@@ -61,7 +61,7 @@ bash scripts/e2e-publish.sh      # publish surface: bin shim, hook contract, MCP
 Both e2e scripts are required to pass before shipping the publish surface
 (CLAUDE.md). Do not proceed on a red run.
 
-Break-glass only: for boxes that cannot reach npm, the GitHub Release carries a packed `.tgz`; build it with `pnpm --filter @chiefmojo/cavemem stage-publish && ( cd apps/cli && npm pack )`.
+Break-glass only: for boxes that cannot reach npm, the GitHub Release carries a packed `.tgz`; build it with `pnpm build && pnpm --filter @chiefmojo/cavemem stage-publish && ( cd apps/cli && npm pack )`.
 
 ---
 
