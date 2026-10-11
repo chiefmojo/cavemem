@@ -14,7 +14,7 @@ Remote mode = `settings.remote.url` is set (the machine talks to a central cavem
 | `uninstall.ts` | `uninstall` | mode-agnostic | Remove IDE wiring |
 | `status.ts` | `status` | remote-aware | Wiring, DB counts, embedding backfill progress, worker liveness; in remote mode a server probe replaces the local DB/worker sections |
 | `config.ts` | `config show/path/get/set/unset/reset/open` | mode-agnostic | Settings viewing/editing (owning the `remote.*` keys) |
-| `doctor.ts` | `doctor` | remote-aware | Health checks (settings, DB, port, embedder, IDEs, Windows `sh`); in remote mode token presence + server health/auth instead of the DB/embedder checks |
+| `doctor.ts` | `doctor` | remote-aware | Health checks (settings, DB, port, embedder, IDEs, Windows `sh`); in remote mode token presence + server health/auth instead of the DB/embedder checks (`probeRemote`'s error text is appended only to the failing `server:`/`auth:` line; the `/healthz` body carries no version, so a healthy line is just `ok`) |
 | `lifecycle.ts` | `start` / `stop` / `restart` / `viewer` | local-only | Ergonomic daemon control (ollama/tailscale-style surface) |
 | `worker.ts` | `worker start/run/stop/status` | local-only | Same pid management, plus foreground `worker run` |
 | `mcp.ts` | `mcp` | local-only | Run the MCP stdio server (invoked by IDEs) |
@@ -43,7 +43,7 @@ Remote mode = `settings.remote.url` is set (the machine talks to a central cavem
 
 ## Flow
 
-- **Setup**: `install` → validate `--ide` against `installers` → ensure settings file → (remote mode: refuse if `remote.token` empty) → `installer.install(ctx)` returns per-step messages (remote mode: `ctx.remote` set, installers write URL-based MCP entries) → persist `ides[name] = true` → Windows `sh` preflight → next-step hints (remote mode: viewer-session curl recipe instead of `cavemem viewer`). `uninstall` mirrors it (`installer.uninstall`, `delete settings.ides[name]`).
+- **Setup**: `install` → validate `--ide` against `installers` → ensure settings file → (remote mode: refuse if `remote.token` empty) → `installer.install(ctx)` returns per-step messages (remote mode: `ctx.remote` set, installers write URL-based MCP entries) → print each message (a leading `warning:` renders as red `warning:` + yellow text via `formatInstallMessage`, everything else with a green `✓`) → persist `ides[name] = true` → Windows `sh` preflight → next-step hints (remote mode: viewer-session curl recipe instead of `cavemem viewer`) → embeddings footer (remote mode: `computed on the server`, since a remote client never embeds or downloads weights; local mode: provider/model and the model download path). `uninstall` mirrors it (`installer.uninstall`, `delete settings.ides[name]`).
 - **Hot path**: IDE stub → `hook run <name> --ide X` → stdin → `normalizeForIde` → `runHook` (`@cavemem/hooks`: remote mode POSTs to `<url>/api/hooks/<name>`, otherwise compression + `MemoryStore.addObservation` + worker auto-spawn probe) → stderr telemetry → optional stdout `additionalContext` → exit code.
 - **Query path**: `search <q>` → remote: `remoteSearch` GET `<url>/api/search` → TSV rows `id \t score \t session_id \t snippet` (snippet whitespace collapsed); local: `MemoryStore.search(query, limit, embedder?)` → the same TSV rows.
 - **Daemon path** (local-only; `requireLocal` refuses in remote mode): `start`/`worker start` → pidfile check → detached `node <cli> worker run` → pidfile write → (`lifecycle.ts` additionally waits and prints the viewer URL). `worker run` blocks in-process running `@cavemem/worker#start()`.

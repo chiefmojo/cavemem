@@ -122,6 +122,56 @@ describe('remote CLI commands', () => {
     expect(existsSync(join(dir, 'data.db'))).toBe(false);
   });
 
+  it('doctor prints a healthy server and auth line with no dangling detail', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ ok: true }))
+        .mockResolvedValueOnce(Response.json({ observations: 3 })),
+    );
+    let out = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      out += String(chunk);
+      return true;
+    });
+
+    await runCommand(['doctor']);
+
+    expect(out).toMatch(/^server: {3}ok$/m);
+    expect(out).toMatch(/^auth: {5}ok$/m);
+    expect(out).not.toMatch(/[ \t]+$/m);
+  });
+
+  it('doctor shows the failure detail on the line of the check that failed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response('ok'))
+        .mockResolvedValueOnce(new Response('unauthorized', { status: 401 })),
+    );
+    let out = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      out += String(chunk);
+      return true;
+    });
+
+    await runCommand(['doctor']);
+
+    expect(out).toMatch(/^server: {3}ok$/m);
+    expect(out).toMatch(/^auth: {5}fail api\/state 401$/m);
+    expect(process.exitCode).toBe(1);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response('', { status: 503 })));
+    out = '';
+
+    await runCommand(['doctor']);
+
+    expect(out).toMatch(/^server: {3}fail healthz 503$/m);
+    expect(out).toMatch(/^auth: {5}fail$/m);
+  });
+
   it('all local-only actions refuse before touching local state', async () => {
     const errors: string[] = [];
     vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
