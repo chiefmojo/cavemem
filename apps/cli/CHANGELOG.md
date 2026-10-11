@@ -1,5 +1,11 @@
 # cavemem
 
+## 0.4.6
+
+### Patch Changes
+
+- No runtime changes from 0.4.5. This is the first release cut with the repaired release tooling: `pnpm run version` now formats new changelog entries without hand edits, and `pnpm release` builds and checks `dist` before publishing.
+
 ## 0.4.5
 
 ### Patch Changes
