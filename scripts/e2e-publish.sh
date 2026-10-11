@@ -40,7 +40,7 @@ export CAVEMEM_NO_AUTOSTART=1
 echo "==> 1. build everything"
 pnpm build >/dev/null
 
-echo "==> 2. stage publish files (README, LICENSE, hooks-scripts)"
+echo "==> 2. verify dist matches version, stage publish files (README, LICENSE, hooks-scripts)"
 pnpm --filter @chiefmojo/cavemem stage-publish
 
 echo "==> 3. npm pack from apps/cli"
