@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { parse as parseToml } from 'smol-toml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { antigravity } from '../src/antigravity.js';
@@ -579,14 +580,15 @@ describe('opencode installer', () => {
 
     const cfg = JSON.parse(readFileSync(cfgPath(), 'utf8')) as {
       mcp: Record<string, { type: string; command: string[]; enabled: boolean }>;
-      plugin: string[];
+      plugin?: string[];
     };
     expect(cfg.mcp.cavemem).toEqual({
       type: 'local',
       command: [ctx.nodeBin, ctx.cliPath, 'mcp'],
       enabled: true,
     });
-    expect(cfg.plugin).toContain('file://./plugins/cavemem.js');
+    // The plugins/ symlink alone loads the bridge; no `plugin` entry.
+    expect(cfg.plugin).toBeUndefined();
 
     // Sidecar records the absolute node binary for the bridge plugin.
     expect(existsSync(bridgeMetaPath())).toBe(true);
@@ -603,10 +605,10 @@ describe('opencode installer', () => {
 
     const cfg = JSON.parse(readFileSync(cfgPath(), 'utf8')) as {
       mcp: Record<string, unknown>;
-      plugin: string[];
+      plugin?: string[];
     };
     expect(Object.keys(cfg.mcp)).toEqual(['cavemem']);
-    expect(cfg.plugin).toContain('file://./plugins/cavemem.js');
+    expect(cfg.plugin).toBeUndefined();
 
     expect(existsSync(pluginPath())).toBe(true);
   });
@@ -698,6 +700,63 @@ describe('opencode installer', () => {
     expect(cfg.mcpServers?.keep).toEqual({ command: '/keep' });
   });
 
+  it('migrates bridge entries out of `plugin` that OpenCode V2 rejects or ignores', async () => {
+    mkdirSync(join(home, '.config', 'opencode'), { recursive: true });
+    writeFileSync(
+      cfgPath(),
+      JSON.stringify({
+        plugin: [
+          'superpowers',
+          'file://./plugins/cavemem.js',
+          pathToFileURL(pluginPath()).href,
+          'file:///elsewhere/plugins/cavemem.js',
+        ],
+      }),
+    );
+
+    await openCode.install(ctx);
+
+    const cfg = JSON.parse(readFileSync(cfgPath(), 'utf8')) as { plugin: string[] };
+    expect(cfg.plugin).toEqual(['superpowers', 'file:///elsewhere/plugins/cavemem.js']);
+    expect(existsSync(pluginPath())).toBe(true);
+  });
+
+  it.each(['install', 'uninstall'] as const)(
+    '%s preserves tuple plugin options while removing string and tuple bridge entries',
+    async (operation) => {
+      const legacyPath = join(home, '.opencode', 'config.json');
+      const paths = operation === 'uninstall' ? [cfgPath(), legacyPath] : [cfgPath()];
+      for (const path of paths) {
+        mkdirSync(join(path, '..'), { recursive: true });
+        writeFileSync(
+          path,
+          JSON.stringify({
+            plugin: [
+              ['other-plugin', { enabled: true, nested: { values: [1, 'two'] } }],
+              'superpowers',
+              ['file:///elsewhere/plugins/cavemem.js', {}],
+              'file://./plugins/cavemem.js',
+              ['file://./plugins/cavemem.js', {}],
+              [pathToFileURL(pluginPath()).href, {}],
+              [pluginPath(), {}],
+            ],
+          }),
+        );
+      }
+
+      await openCode[operation](ctx);
+
+      for (const path of paths) {
+        const cfg = JSON.parse(readFileSync(path, 'utf8'));
+        expect(cfg.plugin).toEqual([
+          ['other-plugin', { enabled: true, nested: { values: [1, 'two'] } }],
+          'superpowers',
+          ['file:///elsewhere/plugins/cavemem.js', {}],
+        ]);
+      }
+    },
+  );
+
   it('preserves unrelated user settings on install + uninstall', async () => {
     mkdirSync(join(home, '.config', 'opencode'), { recursive: true });
     writeFileSync(
@@ -718,8 +777,7 @@ describe('opencode installer', () => {
     expect(installed.theme).toBe('dark');
     expect(installed.mcp.other).toBeDefined();
     expect(installed.mcp.cavemem).toBeDefined();
-    expect(installed.plugin).toContain('some-other-plugin');
-    expect(installed.plugin).toContain('file://./plugins/cavemem.js');
+    expect(installed.plugin).toEqual(['some-other-plugin', 'my-cavemem-helper.js']);
 
     await openCode.uninstall(ctx);
     const after = JSON.parse(readFileSync(cfgPath(), 'utf8')) as typeof installed;

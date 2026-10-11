@@ -10,7 +10,8 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { diagnoseNodes, mcpNode } from './diagnostics.js';
 import { readJson, writeJson } from './fs-utils.js';
@@ -20,10 +21,12 @@ type OpenCodeMcpEntry =
   | { type: 'local'; command: string[]; enabled: boolean }
   | { type: 'remote'; url: string; headers?: Record<string, string>; enabled: boolean };
 
+type OpenCodePluginEntry = string | [string, Record<string, unknown>];
+
 interface OpenCodeConfig {
   mcp?: Record<string, OpenCodeMcpEntry>;
   mcpServers?: Record<string, { command: string; args?: string[] }>;
-  plugin?: string[];
+  plugin?: OpenCodePluginEntry[];
 }
 
 function effectiveConfigUnavailableMessage(inspectionCwd: string): string {
@@ -56,6 +59,40 @@ function verifyEffectiveConfig(intended: OpenCodeMcpEntry, inspectionCwd: string
   return `verified effective OpenCode MCP configuration in ${inspectionCwd}`;
 }
 
+// The bridge's single `{ id, setup, server }` export loads on OpenCode 2 and,
+// through `server`, on OpenCode 1 from 1.18.29 (the first V1 release that
+// accepts an object entrypoint). Older V1 hosts fail to load it.
+const MIN_V1_VERSION = [1, 18, 29] as const;
+
+export const OPENCODE_VERSION_UNREADABLE =
+  'warning: could not read the OpenCode version. The cavemem bridge needs OpenCode 2, or OpenCode 1.18.29 or later.';
+
+export function openCodeVersionWarning(versionOutput: string | null): string | null {
+  const match = versionOutput?.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return OPENCODE_VERSION_UNREADABLE;
+  const version = [Number(match[1]), Number(match[2]), Number(match[3])];
+  for (let i = 0; i < 3; i++) {
+    const part = version[i] as number;
+    const min = MIN_V1_VERSION[i] as number;
+    if (part > min) return null;
+    if (part < min) {
+      return `warning: OpenCode ${version.join('.')} cannot load the cavemem bridge, so sessions will not be captured. Upgrade to OpenCode 2, or OpenCode 1.18.29 or later.`;
+    }
+  }
+  return null;
+}
+
+function readOpenCodeVersion(): string | null {
+  const result = spawnSync('opencode', ['--version'], {
+    encoding: 'utf8',
+    shell: process.platform === 'win32',
+    timeout: 10_000,
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) return null;
+  return result.stdout;
+}
+
 function configRoot(ctx: InstallContext): string {
   // Per OpenCode docs, the user-global config dir is ~/.config/opencode/.
   // We honor XDG_CONFIG_HOME if set.
@@ -79,6 +116,29 @@ function pluginLink(ctx: InstallContext): string {
 // uninstall so users don't end up with stale files.
 function legacyConfigFile(ctx: InstallContext): string {
   return join(ctx.ideConfigDir, '.opencode', 'config.json');
+}
+
+// Entry earlier installers added to `plugin`. OpenCode V2 rejects it as an
+// invalid file URL at startup, and ignores an absolute file URL to a single
+// file ("configured plugin path must be a directory"). Both hosts autoload
+// plugins/, so the symlink alone loads the bridge.
+const LEGACY_PLUGIN_ENTRY = 'file://./plugins/cavemem.js';
+
+function isBridgePluginEntry(plugin: OpenCodePluginEntry, link: string): boolean {
+  const entry = Array.isArray(plugin) ? plugin[0] : plugin;
+  if (entry === LEGACY_PLUGIN_ENTRY) return true;
+  if (!entry.startsWith('file://')) return entry === link;
+  try {
+    return resolve(fileURLToPath(entry)) === resolve(link);
+  } catch {
+    return false;
+  }
+}
+
+function withoutBridgeEntries(config: OpenCodeConfig, link: string): void {
+  if (!config.plugin) return;
+  config.plugin = config.plugin.filter((p) => !isBridgePluginEntry(p, link));
+  if (config.plugin.length === 0) delete config.plugin;
 }
 
 function bridgeMetaFile(ctx: InstallContext): string {
@@ -167,11 +227,7 @@ export const openCode: Installer = {
       delete next.mcpServers.cavemem;
       if (Object.keys(next.mcpServers).length === 0) delete next.mcpServers;
     }
-    // Ensure the bundled bridge plugin is listed so OpenCode auto-loads it.
-    // Plugins in plugins/ also auto-load, but listing in `plugin` makes intent
-    // explicit and survives plugin-dir overrides.
-    const pluginList = Array.from(new Set([...(next.plugin ?? []), 'file://./plugins/cavemem.js']));
-    next.plugin = pluginList;
+    withoutBridgeEntries(next, pluginLink(ctx));
     writeJson(path, next);
     messages.push(`wrote ${path}`);
 
@@ -222,6 +278,9 @@ export const openCode: Installer = {
       }
     }
 
+    const versionWarning = openCodeVersionWarning(readOpenCodeVersion());
+    if (versionWarning) messages.push(versionWarning);
+
     const inspectionCwd = process.cwd();
     messages.push(verifyEffectiveConfig(entry, inspectionCwd));
 
@@ -245,10 +304,7 @@ export const openCode: Installer = {
         delete current.mcpServers.cavemem;
         if (Object.keys(current.mcpServers).length === 0) delete current.mcpServers;
       }
-      if (current.plugin) {
-        current.plugin = current.plugin.filter((p) => p !== 'file://./plugins/cavemem.js');
-        if (current.plugin.length === 0) delete current.plugin;
-      }
+      withoutBridgeEntries(current, pluginLink(ctx));
       writeJson(path, current);
       messages.push(`updated ${path}`);
     }

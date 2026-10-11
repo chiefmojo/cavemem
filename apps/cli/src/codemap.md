@@ -5,7 +5,7 @@ CLI entrypoint, the OpenCode plugin bridge, and build-time type declarations.
 ## Responsibility
 
 - `index.ts` — the `cavemem` bin entrypoint: builds the commander program, guards against double-execution, handles top-level process concerns (EPIPE, unhandled command errors, version banner).
-- `opencode-bridge.ts` — OpenCode plugin module (`dist/opencodeBridge.js`, separate tsup entry) that bridges OpenCode's event stream into cavemem hook commands and injects prior-session context into the system prompt.
+- `opencode-bridge.ts` — OpenCode plugin module (`dist/opencodeBridge.js`, separate tsup entry) whose single default export `{ id, setup, server }` serves OpenCode 2 (`setup`: event stream, `session`/`tool` hooks, scoped to its location) and OpenCode 1.18.29+ (`server`: V1 hook map). Both adapters translate host events into `opencode-bridge-core.ts`, which spawns cavemem hook commands and builds the system-prompt additions (MCP tool availability, prior-session context).
 - `env.d.ts` — ambient declaration for the `__CAVEMEM_VERSION__` constant tsup injects via `define` (value = `package.json` version).
 
 ## Design

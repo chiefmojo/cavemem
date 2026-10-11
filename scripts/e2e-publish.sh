@@ -73,14 +73,21 @@ test "$ACTUAL_VERSION" = "$EXPECTED_VERSION" || {
 }
 echo "$ACTUAL_VERSION"
 
-echo "==> 6b. published OpenCode bridge exposes only its plugin factory"
+echo "==> 6b. published OpenCode bridge exposes only its V1+V2 plugin definition"
 BRIDGE="$PREFIX/lib/node_modules/@chiefmojo/cavemem/dist/opencodeBridge.js"
 test -f "$BRIDGE" || { echo "published OpenCode bridge missing"; exit 1; }
 BRIDGE="$BRIDGE" node --input-type=module -e '
   import { pathToFileURL } from "node:url";
-  const exports = Object.keys(await import(pathToFileURL(process.env.BRIDGE).href));
+  const mod = await import(pathToFileURL(process.env.BRIDGE).href);
+  const exports = Object.keys(mod);
   if (exports.length !== 1 || exports[0] !== "default") {
     console.error(`unexpected OpenCode bridge exports: ${exports.join(", ")}`);
+    process.exit(1);
+  }
+  // OpenCode V2 validates { id, setup }; V1 >= 1.18.29 loads server.
+  const def = mod.default;
+  if (typeof def?.id !== "string" || typeof def.setup !== "function" || typeof def.server !== "function") {
+    console.error("OpenCode bridge default is not a { id, setup, server } plugin definition");
     process.exit(1);
   }
 '
