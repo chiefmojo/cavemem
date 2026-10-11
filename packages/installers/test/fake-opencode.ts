@@ -13,6 +13,7 @@ export function writeFakeOpenCode(home: string): string {
     script,
     [
       "import { readFileSync } from 'node:fs';",
+      "if (process.argv.slice(2).join(' ') === '--version') { if (process.env.FAKE_OPENCODE_VERSION === 'fail') process.exit(7); process.stdout.write((process.env.FAKE_OPENCODE_VERSION ?? 'opencode v2.0.26') + '\\n'); process.exit(0); }",
       "if (process.argv.slice(2).join(' ') !== 'debug config --pure') { process.stderr.write('wrong arguments'); process.exit(8); }",
       'if (process.env.FAKE_OPENCODE_FAILURE) { process.stderr.write(process.env.FAKE_OPENCODE_FAILURE); process.exit(9); }',
       "const root = process.env.XDG_CONFIG_HOME ?? process.env.HOME + '/.config';",

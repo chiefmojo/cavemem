@@ -57,6 +57,40 @@ function verifyEffectiveConfig(intended: OpenCodeMcpEntry, inspectionCwd: string
   return `verified effective OpenCode MCP configuration in ${inspectionCwd}`;
 }
 
+// The bridge's single `{ id, setup, server }` export loads on OpenCode 2 and,
+// through `server`, on OpenCode 1 from 1.18.29 (the first V1 release that
+// accepts an object entrypoint). Older V1 hosts fail to load it.
+const MIN_V1_VERSION = [1, 18, 29] as const;
+
+export const OPENCODE_VERSION_UNREADABLE =
+  'warning: could not read the OpenCode version. The cavemem bridge needs OpenCode 2, or OpenCode 1.18.29 or later.';
+
+export function openCodeVersionWarning(versionOutput: string | null): string | null {
+  const match = versionOutput?.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return OPENCODE_VERSION_UNREADABLE;
+  const version = [Number(match[1]), Number(match[2]), Number(match[3])];
+  for (let i = 0; i < 3; i++) {
+    const part = version[i] as number;
+    const min = MIN_V1_VERSION[i] as number;
+    if (part > min) return null;
+    if (part < min) {
+      return `warning: OpenCode ${version.join('.')} cannot load the cavemem bridge, so sessions will not be captured. Upgrade to OpenCode 2, or OpenCode 1.18.29 or later.`;
+    }
+  }
+  return null;
+}
+
+function readOpenCodeVersion(): string | null {
+  const result = spawnSync('opencode', ['--version'], {
+    encoding: 'utf8',
+    shell: process.platform === 'win32',
+    timeout: 10_000,
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) return null;
+  return result.stdout;
+}
+
 function configRoot(ctx: InstallContext): string {
   // Per OpenCode docs, the user-global config dir is ~/.config/opencode/.
   // We honor XDG_CONFIG_HOME if set.
@@ -240,6 +274,9 @@ export const openCode: Installer = {
         // Ignore parse errors in legacy config — not our file anymore.
       }
     }
+
+    const versionWarning = openCodeVersionWarning(readOpenCodeVersion());
+    if (versionWarning) messages.push(versionWarning);
 
     const inspectionCwd = process.cwd();
     messages.push(verifyEffectiveConfig(entry, inspectionCwd));
