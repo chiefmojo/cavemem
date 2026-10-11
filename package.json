@@ -20,13 +20,13 @@
   "scripts": {
     "build": "pnpm -r --filter \"./packages/*\" --filter \"./apps/*\" build",
     "dev": "pnpm --filter @chiefmojo/cavemem dev",
-    "test": "pnpm -r test",
+    "test": "pnpm -r test && vitest run --dir scripts",
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "clean": "pnpm -r exec rm -rf dist && rm -rf node_modules/.cache",
-    "version": "changeset version && biome check --write --linter-enabled=false .",
+    "version": "changeset version && node scripts/changelog-spacing.mjs && biome check --write --linter-enabled=false .",
     "release": "pnpm build && changeset publish"
   },
   "devDependencies": {
