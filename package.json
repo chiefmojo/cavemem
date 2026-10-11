@@ -5,13 +5,13 @@
   "description": "Cross-agent persistent memory with compressed storage.",
   "license": "MIT",
   "author": "Julius Brussee",
-  "homepage": "https://github.com/JuliusBrussee/cavemem",
+  "homepage": "https://github.com/chiefmojo/cavemem",
   "repository": {
     "type": "git",
-    "url": "https://github.com/JuliusBrussee/cavemem.git"
+    "url": "https://github.com/chiefmojo/cavemem.git"
   },
   "bugs": {
-    "url": "https://github.com/JuliusBrussee/cavemem/issues"
+    "url": "https://github.com/chiefmojo/cavemem/issues"
   },
   "engines": {
     "node": ">=20.0.0"
