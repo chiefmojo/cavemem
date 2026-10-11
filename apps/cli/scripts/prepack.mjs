@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Stages README, LICENSE, and the portable hook stubs into apps/cli/ so the
-// `files` allowlist in package.json picks them up. Runs automatically as a
-// `prepack` lifecycle script for both `npm pack` and `npm publish` (and
-// therefore for `changeset publish` too).
+// `files` allowlist in package.json picks them up. Wired through
+// `prepublishOnly` and `stage-publish` (after verify-dist.mjs), not `prepack`,
+// so a plain `npm pack` does not stage these files.
 import { cpSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,10 +11,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const cliRoot = resolve(here, '..');
 const repoRoot = resolve(cliRoot, '..', '..');
 
-// `npm prepack` runs not just on pack/publish but also when installing this
-// package from a tarball or git url. In those installs the source files don't
-// exist (they live at the upstream repo root). If the upstream root doesn't
-// look like our monorepo, skip silently.
+// The staged files live at the monorepo root, so outside a checkout of it
+// (a copied or unpacked apps/cli) there is nothing to stage: skip silently.
 if (!existsSync(join(repoRoot, 'pnpm-workspace.yaml'))) {
   process.stdout.write('prepack: not in source repo, skipping\n');
   process.exit(0);

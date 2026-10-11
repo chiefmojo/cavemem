@@ -19,6 +19,15 @@ import { resolveCliPath, resolveNodePath } from '../util/resolve.js';
 // is the only IDE that needs this preflight today.
 const SH_DEPENDENT_IDES = new Set<IdeName>(['claude-code']);
 
+// Installers prefix non-fatal problems with `warning:`; render them with the
+// same red `warning:` + yellow text used for the Windows sh preflight below
+// rather than the green success mark.
+export function formatInstallMessage(message: string): string {
+  const prefix = 'warning:';
+  if (!message.startsWith(prefix)) return `${kleur.green('✓')} ${message}`;
+  return `${kleur.red(kleur.bold(prefix))} ${kleur.yellow(message.slice(prefix.length).trimStart())}`;
+}
+
 export function registerInstallCommand(program: Command): void {
   program
     .command('install')
@@ -54,7 +63,7 @@ export function registerInstallCommand(program: Command): void {
       };
       const installer = getInstaller(name);
       const msgs = await installer.install(ctx);
-      for (const m of msgs) process.stdout.write(`${kleur.green('✓')} ${m}\n`);
+      for (const m of msgs) process.stdout.write(`${formatInstallMessage(m)}\n`);
       settings.ides[name] = true;
       saveSettings(settings);
 
@@ -99,7 +108,13 @@ export function registerInstallCommand(program: Command): void {
       );
       process.stdout.write(`  ${kleur.cyan('cavemem config show')}   see settings + docs\n\n`);
 
-      if (provider === 'local') {
+      if (ctx.remote) {
+        // Remote clients never open a local store or embed: hooks POST to the
+        // server, and search/MCP go over HTTP (CLAUDE.md rule 9).
+        process.stdout.write(
+          `${kleur.dim('embeddings: computed on the server — this client downloads no model weights.')}\n`,
+        );
+      } else if (provider === 'local') {
         process.stdout.write(
           `${kleur.dim(
             `embeddings: local ${model} — weights (~25 MB) download to ${ctx.dataDir}/models on first use.`,

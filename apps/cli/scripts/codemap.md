@@ -14,7 +14,7 @@ Two publish paths, both required to work (CLAUDE.md release policy):
 
 **prepack.mjs**
 - Copies `README.md`, `LICENSE`, and `hooks-scripts/` from the repo root into `apps/cli/` (recursive copy for the hook stubs). The portable shell stubs (`session-start.sh`, `user-prompt-submit.sh`, `post-tool-use.sh`, `stop.sh`, `session-end.sh`) must ship in the tarball — they are what installed IDE hook configs invoke, and they in turn call `cavemem hook run <name>`.
-- Guards against non-source environments: `npm prepack` also fires when the package is installed from a tarball or git URL, where repo-root sources don't exist. The script detects this by checking for `pnpm-workspace.yaml` at the resolved repo root and exits 0 silently if absent; missing individual sources exit 1 with a short message (no silent failures).
+- Guards against non-source environments: outside a checkout of the monorepo (a copied or unpacked `apps/cli`) the repo-root sources don't exist. The script detects this by checking for `pnpm-workspace.yaml` at the resolved repo root and exits 0 silently if absent; missing individual sources exit 1 with a short message (no silent failures).
 
 **pack-release.mjs**
 - Wipes and recreates `apps/cli/release/`, then assembles a hand-written minimal `package.json` instead of copying the workspace one: keeps package identity/engines/`bin`/`main`, but **narrows `dependencies` to the exact list tsup keeps external** (`RUNTIME_DEPS` = commander, kleur, better-sqlite3, hono, @hono/node-server, @modelcontextprotocol/sdk). All `@cavemem/*` workspace code is bundled into `dist/index.js` by tsup (`noExternal: [/^@cavemem\//]`), so shipping them as dependencies would be wrong — they don't exist in the tarball.

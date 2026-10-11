@@ -38,6 +38,7 @@ describe('writeFakeOpenCode', () => {
         HOME: home,
         XDG_CONFIG_HOME: join(home, '.config'),
         FAKE_OPENCODE_FAILURE: '',
+        FAKE_OPENCODE_VERSION: 'opencode 1.18.29',
         FAKE_OPENCODE_OUTPUT: '{"mcp":{}}',
       },
     });

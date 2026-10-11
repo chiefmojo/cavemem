@@ -33,7 +33,7 @@ vi.mock('@cavemem/installers', () => {
   };
 });
 
-import { registerInstallCommand } from '../src/commands/install.js';
+import { formatInstallMessage, registerInstallCommand } from '../src/commands/install.js';
 
 beforeEach(() => {
   mocks.settings = settingsWithRemote('http://neuromancer:37777');
@@ -81,6 +81,67 @@ describe('remote install', () => {
     expect(out).toContain('http://neuromancer:37777');
     expect(out).toContain('remote memory viewer');
     expect(out).not.toContain('cavemem viewer');
+  });
+});
+
+describe('install output', () => {
+  function capture(): () => string {
+    let out = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      out += String(chunk);
+      return true;
+    });
+    return () => out;
+  }
+
+  it('renders installer warnings as warnings, not with the success mark', async () => {
+    mocks.install.mockResolvedValueOnce(['wrote /x/opencode.json', 'warning: something is off']);
+    const out = capture();
+
+    await runInstall();
+
+    const lines = out().split('\n');
+    expect(lines.find((l) => l.includes('wrote /x/opencode.json'))).toContain('✓');
+    const warning = lines.find((l) => l.includes('something is off'));
+    expect(warning).toContain('warning: something is off');
+    expect(warning).not.toContain('✓');
+  });
+
+  it('formatInstallMessage marks only non-warning lines with the success mark', () => {
+    expect(formatInstallMessage('wrote /x')).toContain('✓');
+    expect(formatInstallMessage('warning: careful')).not.toContain('✓');
+    expect(formatInstallMessage('warning: careful')).toContain('warning: careful');
+  });
+
+  it('does not claim local model weights will download on a remote-mode client', async () => {
+    mocks.settings = {
+      ...settingsWithRemote('http://neuromancer:37777'),
+      embedding: { provider: 'local', model: 'Xenova/all-MiniLM-L6-v2' },
+    };
+    const out = capture();
+
+    await runInstall();
+
+    expect(out()).toContain('embeddings: computed on the server');
+    expect(out()).not.toContain('weights (~25 MB)');
+    expect(out()).not.toContain('/models');
+    expect(out()).not.toContain('Xenova/all-MiniLM-L6-v2');
+  });
+
+  it('still reports the local embedding model download on a local-mode install', async () => {
+    mocks.settings = {
+      dataDir: '/tmp/cavemem-install-local-test',
+      remote: { url: '', token: '', timeoutMs: 1500 },
+      ides: {},
+      embedding: { provider: 'local', model: 'Xenova/all-MiniLM-L6-v2' },
+    };
+    const out = capture();
+
+    await runInstall();
+
+    expect(out()).toContain('embeddings: local Xenova/all-MiniLM-L6-v2');
+    expect(out()).toContain('/tmp/cavemem-install-local-test/models');
+    expect(out()).not.toContain('computed on the server');
   });
 });
 

@@ -29,16 +29,24 @@ interface OpenCodeConfig {
   plugin?: OpenCodePluginEntry[];
 }
 
-function effectiveConfigUnavailableMessage(inspectionCwd: string): string {
-  return `warning: OpenCode MCP verification in ${inspectionCwd} could not read effective configuration with \`opencode debug config --pure\`. Cavemem installation completed; other OpenCode configuration sources were left unchanged.`;
+const V1_CONFIG_COMMAND = 'opencode debug config --pure';
+const V2_CONFIG_COMMAND = 'opencode debug config';
+
+function effectiveConfigUnavailableMessage(inspectionCwd: string, command: string): string {
+  return `warning: OpenCode MCP verification in ${inspectionCwd} could not read effective configuration with \`${command}\`. Cavemem installation completed; other OpenCode configuration sources were left unchanged.`;
 }
 
-function effectiveConfigMismatchMessage(inspectionCwd: string): string {
-  return `warning: OpenCode MCP verification in ${inspectionCwd}: effective mcp.cavemem differs from the installed global entry. This may be an intentional project, managed, environment, or other configuration override; Cavemem left those sources unchanged.`;
+function effectiveConfigMismatchMessage(inspectionCwd: string, overriddenBy?: string): string {
+  const by = overriddenBy ? ` (set by ${overriddenBy})` : '';
+  return `warning: OpenCode MCP verification in ${inspectionCwd}: effective mcp.cavemem differs from the installed global entry${by}. This may be an intentional project, managed, environment, or other configuration override; Cavemem left those sources unchanged.`;
 }
 
-function verifyEffectiveConfig(intended: OpenCodeMcpEntry, inspectionCwd: string): string {
-  const result = spawnSync('opencode', ['debug', 'config', '--pure'], {
+function effectiveConfigMissingMessage(inspectionCwd: string): string {
+  return `warning: OpenCode MCP verification in ${inspectionCwd}: no configuration source reported by \`${V2_CONFIG_COMMAND}\` defines mcp.cavemem. Cavemem installation completed; other OpenCode configuration sources were left unchanged.`;
+}
+
+function runOpenCodeConfig(args: string[], inspectionCwd: string): string | null {
+  const result = spawnSync('opencode', args, {
     cwd: inspectionCwd,
     encoding: 'utf8',
     maxBuffer: 4 * 1024 * 1024,
@@ -46,17 +54,92 @@ function verifyEffectiveConfig(intended: OpenCodeMcpEntry, inspectionCwd: string
     timeout: 10_000,
     windowsHide: true,
   });
-  if (result.error || result.status !== 0) return effectiveConfigUnavailableMessage(inspectionCwd);
+  if (result.error || result.status !== 0) return null;
+  return result.stdout;
+}
+
+// OpenCode 1: `--pure` prints one merged config in the on-disk shape.
+function verifyMergedConfig(intended: OpenCodeMcpEntry, inspectionCwd: string): string {
+  const unavailable = effectiveConfigUnavailableMessage(inspectionCwd, V1_CONFIG_COMMAND);
+  const stdout = runOpenCodeConfig(['debug', 'config', '--pure'], inspectionCwd);
+  if (stdout === null) return unavailable;
 
   let effective: unknown;
   try {
-    effective = (JSON.parse(result.stdout) as { mcp?: { cavemem?: unknown } }).mcp?.cavemem;
+    effective = (JSON.parse(stdout) as { mcp?: { cavemem?: unknown } }).mcp?.cavemem;
   } catch {
-    return effectiveConfigUnavailableMessage(inspectionCwd);
+    return unavailable;
   }
   if (!isDeepStrictEqual(effective, intended)) return effectiveConfigMismatchMessage(inspectionCwd);
 
   return `verified effective OpenCode MCP configuration in ${inspectionCwd}`;
+}
+
+interface OpenCodeConfigSource {
+  path?: string;
+  info?: { mcp?: { servers?: Record<string, unknown> } };
+}
+
+// OpenCode 2 has no merged view and no `--pure`: `debug config` lists the
+// sources, and normalizes each one's `info` to `mcp.servers.<name>` with
+// `disabled` instead of `enabled`. It masks every header value as "***", so
+// header names are all that can be compared.
+function maskHeaders(headers: unknown): unknown {
+  if (typeof headers !== 'object' || headers === null) return headers;
+  return Object.fromEntries(Object.keys(headers).map((name) => [name, '***']));
+}
+
+function normalizeV2Entry(entry: unknown): unknown {
+  if (typeof entry !== 'object' || entry === null || !('headers' in entry)) return entry;
+  return { ...entry, headers: maskHeaders((entry as { headers: unknown }).headers) };
+}
+
+function intendedAsV2(intended: OpenCodeMcpEntry): unknown {
+  const { enabled, ...rest } = intended;
+  return normalizeV2Entry({ ...rest, disabled: !enabled });
+}
+
+// Sources are listed lowest to highest precedence (global, OPENCODE_CONFIG,
+// project dirs outer to inner, .opencode, inline content — verified against
+// OpenCode 2.0.26), so the last source defining mcp.cavemem wins.
+function verifySourceList(intended: OpenCodeMcpEntry, inspectionCwd: string): string {
+  const unavailable = effectiveConfigUnavailableMessage(inspectionCwd, V2_CONFIG_COMMAND);
+  const stdout = runOpenCodeConfig(['debug', 'config'], inspectionCwd);
+  if (stdout === null) return unavailable;
+
+  let sources: unknown;
+  try {
+    sources = JSON.parse(stdout);
+  } catch {
+    return unavailable;
+  }
+  if (!Array.isArray(sources)) return unavailable;
+
+  let winner: OpenCodeConfigSource | undefined;
+  for (const source of sources as OpenCodeConfigSource[]) {
+    if (source?.info?.mcp?.servers?.cavemem !== undefined) winner = source;
+  }
+  if (!winner) return effectiveConfigMissingMessage(inspectionCwd);
+
+  const effective = normalizeV2Entry(winner.info?.mcp?.servers?.cavemem);
+  if (!isDeepStrictEqual(effective, intendedAsV2(intended))) {
+    return effectiveConfigMismatchMessage(
+      inspectionCwd,
+      winner.path ?? 'a configuration source without a path',
+    );
+  }
+
+  return `verified effective OpenCode MCP configuration in ${inspectionCwd}`;
+}
+
+function verifyEffectiveConfig(
+  intended: OpenCodeMcpEntry,
+  inspectionCwd: string,
+  version: OpenCodeVersion | null,
+): string {
+  return version && version[0] >= 2
+    ? verifySourceList(intended, inspectionCwd)
+    : verifyMergedConfig(intended, inspectionCwd);
 }
 
 // The bridge's single `{ id, setup, server }` export loads on OpenCode 2 and,
@@ -67,10 +150,16 @@ const MIN_V1_VERSION = [1, 18, 29] as const;
 export const OPENCODE_VERSION_UNREADABLE =
   'warning: could not read the OpenCode version. The cavemem bridge needs OpenCode 2, or OpenCode 1.18.29 or later.';
 
-export function openCodeVersionWarning(versionOutput: string | null): string | null {
+type OpenCodeVersion = [number, number, number];
+
+function parseOpenCodeVersion(versionOutput: string | null): OpenCodeVersion | null {
   const match = versionOutput?.match(/(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return OPENCODE_VERSION_UNREADABLE;
-  const version = [Number(match[1]), Number(match[2]), Number(match[3])];
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+export function openCodeVersionWarning(versionOutput: string | null): string | null {
+  const version = parseOpenCodeVersion(versionOutput);
+  if (!version) return OPENCODE_VERSION_UNREADABLE;
   for (let i = 0; i < 3; i++) {
     const part = version[i] as number;
     const min = MIN_V1_VERSION[i] as number;
@@ -278,11 +367,12 @@ export const openCode: Installer = {
       }
     }
 
-    const versionWarning = openCodeVersionWarning(readOpenCodeVersion());
+    const versionOutput = readOpenCodeVersion();
+    const versionWarning = openCodeVersionWarning(versionOutput);
     if (versionWarning) messages.push(versionWarning);
 
     const inspectionCwd = process.cwd();
-    messages.push(verifyEffectiveConfig(entry, inspectionCwd));
+    messages.push(verifyEffectiveConfig(entry, inspectionCwd, parseOpenCodeVersion(versionOutput)));
 
     return messages;
   },

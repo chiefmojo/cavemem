@@ -48,10 +48,16 @@ export function registerDoctorCommand(program: Command): void {
         );
         if (!target.token) process.exitCode = 1;
         const probe = await probeRemote(target);
+        // probe.error belongs to whichever check failed: the server line when
+        // /healthz failed, the auth line when only /api/state was refused. The
+        // /healthz body is just { ok: true } — it carries no server version.
+        const detail = (failed: boolean) => (failed && probe.error ? ` ${probe.error}` : '');
         process.stdout.write(
-          `server:   ${probe.healthz ? kleur.green('ok') : kleur.red('fail')} ${probe.error ?? ''}\n`,
+          `server:   ${probe.healthz ? kleur.green('ok') : kleur.red('fail')}${detail(!probe.healthz)}\n`,
         );
-        process.stdout.write(`auth:     ${probe.auth ? kleur.green('ok') : kleur.red('fail')}\n`);
+        process.stdout.write(
+          `auth:     ${probe.auth ? kleur.green('ok') : kleur.red('fail')}${detail(probe.healthz && !probe.auth)}\n`,
+        );
         if (!probe.healthz || !probe.auth) process.exitCode = 1;
         if (settings.ides.codex) {
           const mode = codexMcpMode(homedir());

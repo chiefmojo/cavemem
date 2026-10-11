@@ -6,12 +6,13 @@ import { openCode } from '../src/opencode.js';
 import type { InstallContext } from '../src/types.js';
 import { writeFakeOpenCode } from './fake-opencode.js';
 
-describe('OpenCode effective configuration verification', () => {
+describe('OpenCode 1 effective configuration verification', () => {
   let home: string;
   let originalPath: string | undefined;
   let originalXdg: string | undefined;
   let originalOutput: string | undefined;
   let originalFailure: string | undefined;
+  let originalVersion: string | undefined;
   let ctx: InstallContext;
 
   beforeEach(() => {
@@ -20,6 +21,8 @@ describe('OpenCode effective configuration verification', () => {
     originalXdg = process.env.XDG_CONFIG_HOME;
     originalOutput = process.env.FAKE_OPENCODE_OUTPUT;
     originalFailure = process.env.FAKE_OPENCODE_FAILURE;
+    originalVersion = process.env.FAKE_OPENCODE_VERSION;
+    process.env.FAKE_OPENCODE_VERSION = 'opencode 1.18.29';
     delete process.env.FAKE_OPENCODE_OUTPUT;
     delete process.env.FAKE_OPENCODE_FAILURE;
     process.env.XDG_CONFIG_HOME = join(home, '.config');
@@ -48,6 +51,8 @@ describe('OpenCode effective configuration verification', () => {
     else process.env.FAKE_OPENCODE_OUTPUT = originalOutput;
     if (originalFailure === undefined) delete process.env.FAKE_OPENCODE_FAILURE;
     else process.env.FAKE_OPENCODE_FAILURE = originalFailure;
+    if (originalVersion === undefined) delete process.env.FAKE_OPENCODE_VERSION;
+    else process.env.FAKE_OPENCODE_VERSION = originalVersion;
     rmSync(home, { recursive: true, force: true });
   });
 
