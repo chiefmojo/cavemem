@@ -9,6 +9,9 @@ Three companion scripts cover the two distinct publish paths plus the remote-mod
 - `e2e-pack-release.sh` — covers the legacy `pnpm publish:release` path (via `apps/cli/scripts/pack-release.mjs` writing `apps/cli/release/`). Dry-runs the same artifact: pack → install → drive a hook → search → doctor.
 - `e2e-remote.sh` — covers the **remote-mode runtime** path against the published artifact (build + pack + install as above). Boots a worker in one isolated `$HOME` (free port, `provider: none`, idle shutdown off) and points a second isolated `$HOME` at it via `remote.url`/`worker-token`. Drives every hook event from the client and asserts: rows land only on the server (no client `data.db`), remote search/`status`/`doctor` behave, local-only commands refuse, `install --ide claude-code` writes an http `/mcp` entry, MCP-over-HTTP answers `initialize` with a bearer token and 401s without one, the viewer requires its single-use cookie handshake (nonce → 302 → cookie, which never authenticates `/api/*`), and hooks spool during a worker outage and drain on recovery. Runs 15 numbered checks. Self-cleans via an EXIT trap (kills the worker, removes `.e2e-remote/`).
 
+Release tooling, not part of the e2e harness:
+- `changelog-spacing.mjs` — runs inside the root `version` script, after `changeset version`. `.changeset/config.json` sets `"prettier": false` so changesets stops reformatting old CHANGELOG entries. @changesets/cli 2.x then writes each new entry unformatted: no blank line after `## <version>`, and whitespace-only lines inside multi-paragraph items. `fixNewestEntry` corrects only the newest entry, so released entries stay byte-for-byte unchanged. Upstream fixed the heading join in 3.0.0 (changesets/changesets#2118); once on v3 this should be a no-op. Tests: `scripts/test/`, run by the root `pnpm test`.
+
 ## Flow
 1. Build and stage publish files.
 2. `npm pack` the release dir (mirrors what `changeset publish` / `publish:release` uploads).

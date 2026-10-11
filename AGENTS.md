@@ -11,6 +11,7 @@ cavemem is a pnpm-workspaces TypeScript monorepo. Application entry points live 
 - `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` — the four required merge gates.
 - `pnpm --filter @cavemem/compress test` — required after any compressor, lexicon, or tokenizer change; includes the technical-token preservation suite.
 - `pnpm changeset` — required for every change under `packages/*` or `apps/*`; commit the generated file with the PR.
+- `pnpm run version` — release prep: consumes changesets into versions and changelogs, then `scripts/changelog-spacing.mjs` formats the new entries. Use `run`: bare `pnpm version` is pnpm's built-in command and skips the script.
 - `bash scripts/e2e-publish.sh` — packed-global-CLI publish test (CI gate). Add `bash scripts/e2e-remote.sh` for remote-mode changes.
 
 ## Coding Style & Naming Conventions
