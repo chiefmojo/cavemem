@@ -721,6 +721,42 @@ describe('opencode installer', () => {
     expect(existsSync(pluginPath())).toBe(true);
   });
 
+  it.each(['install', 'uninstall'] as const)(
+    '%s preserves tuple plugin options while removing string and tuple bridge entries',
+    async (operation) => {
+      const legacyPath = join(home, '.opencode', 'config.json');
+      const paths = operation === 'uninstall' ? [cfgPath(), legacyPath] : [cfgPath()];
+      for (const path of paths) {
+        mkdirSync(join(path, '..'), { recursive: true });
+        writeFileSync(
+          path,
+          JSON.stringify({
+            plugin: [
+              ['other-plugin', { enabled: true, nested: { values: [1, 'two'] } }],
+              'superpowers',
+              ['file:///elsewhere/plugins/cavemem.js', {}],
+              'file://./plugins/cavemem.js',
+              ['file://./plugins/cavemem.js', {}],
+              [pathToFileURL(pluginPath()).href, {}],
+              [pluginPath(), {}],
+            ],
+          }),
+        );
+      }
+
+      await openCode[operation](ctx);
+
+      for (const path of paths) {
+        const cfg = JSON.parse(readFileSync(path, 'utf8'));
+        expect(cfg.plugin).toEqual([
+          ['other-plugin', { enabled: true, nested: { values: [1, 'two'] } }],
+          'superpowers',
+          ['file:///elsewhere/plugins/cavemem.js', {}],
+        ]);
+      }
+    },
+  );
+
   it('preserves unrelated user settings on install + uninstall', async () => {
     mkdirSync(join(home, '.config', 'opencode'), { recursive: true });
     writeFileSync(

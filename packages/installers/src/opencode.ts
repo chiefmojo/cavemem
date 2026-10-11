@@ -21,10 +21,12 @@ type OpenCodeMcpEntry =
   | { type: 'local'; command: string[]; enabled: boolean }
   | { type: 'remote'; url: string; headers?: Record<string, string>; enabled: boolean };
 
+type OpenCodePluginEntry = string | [string, Record<string, unknown>];
+
 interface OpenCodeConfig {
   mcp?: Record<string, OpenCodeMcpEntry>;
   mcpServers?: Record<string, { command: string; args?: string[] }>;
-  plugin?: string[];
+  plugin?: OpenCodePluginEntry[];
 }
 
 function effectiveConfigUnavailableMessage(inspectionCwd: string): string {
@@ -122,7 +124,8 @@ function legacyConfigFile(ctx: InstallContext): string {
 // plugins/, so the symlink alone loads the bridge.
 const LEGACY_PLUGIN_ENTRY = 'file://./plugins/cavemem.js';
 
-function isBridgePluginEntry(entry: string, link: string): boolean {
+function isBridgePluginEntry(plugin: OpenCodePluginEntry, link: string): boolean {
+  const entry = Array.isArray(plugin) ? plugin[0] : plugin;
   if (entry === LEGACY_PLUGIN_ENTRY) return true;
   if (!entry.startsWith('file://')) return entry === link;
   try {
