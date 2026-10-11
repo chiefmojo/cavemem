@@ -1,5 +1,12 @@
 # @cavemem/installers
 
+## 0.4.4
+
+### Patch Changes
+
+- c598542: Load the OpenCode bridge under OpenCode 2. The bridge now exports one `{ id, setup, server }` plugin definition: `setup` uses the V2 event stream and `session`/`tool` hooks; `server` keeps OpenCode 1.18.29 and later working. Capture and context injection behave as before. `cavemem install --ide opencode` stops adding the bridge to `plugin` in `opencode.json`, and removes earlier entries that OpenCode 2 rejects or ignores. Both hosts load the bridge from the `plugins/` symlink. Install also warns, without failing, when `opencode --version` reports an OpenCode 1 release older than 1.18.29 or cannot be read.
+- c598542: Handle OpenCode tuple plugin entries during install and uninstall. Preserve unrelated plugins and their options while removing obsolete Cavemem bridge entries in either string or tuple form.
+
 ## 0.4.3
 
 ### Patch Changes
