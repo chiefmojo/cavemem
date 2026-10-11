@@ -177,7 +177,7 @@ describe('opencode-bridge prior-context priming', () => {
       JSON.stringify({ embedding: { provider: 'none' }, ...settings }),
     );
     const mod = await import('../src/opencode-bridge.js');
-    const hooks = (await mod.default({
+    const hooks = (await mod.default.server({
       $: {} as never,
       client: { mcp: { status: mcpStatus } },
       directory,

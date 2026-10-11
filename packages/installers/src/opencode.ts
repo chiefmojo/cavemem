@@ -10,7 +10,8 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { diagnoseNodes, mcpNode } from './diagnostics.js';
 import { readJson, writeJson } from './fs-utils.js';
@@ -79,6 +80,28 @@ function pluginLink(ctx: InstallContext): string {
 // uninstall so users don't end up with stale files.
 function legacyConfigFile(ctx: InstallContext): string {
   return join(ctx.ideConfigDir, '.opencode', 'config.json');
+}
+
+// Entry earlier installers added to `plugin`. OpenCode V2 rejects it as an
+// invalid file URL at startup, and ignores an absolute file URL to a single
+// file ("configured plugin path must be a directory"). Both hosts autoload
+// plugins/, so the symlink alone loads the bridge.
+const LEGACY_PLUGIN_ENTRY = 'file://./plugins/cavemem.js';
+
+function isBridgePluginEntry(entry: string, link: string): boolean {
+  if (entry === LEGACY_PLUGIN_ENTRY) return true;
+  if (!entry.startsWith('file://')) return entry === link;
+  try {
+    return resolve(fileURLToPath(entry)) === resolve(link);
+  } catch {
+    return false;
+  }
+}
+
+function withoutBridgeEntries(config: OpenCodeConfig, link: string): void {
+  if (!config.plugin) return;
+  config.plugin = config.plugin.filter((p) => !isBridgePluginEntry(p, link));
+  if (config.plugin.length === 0) delete config.plugin;
 }
 
 function bridgeMetaFile(ctx: InstallContext): string {
@@ -167,11 +190,7 @@ export const openCode: Installer = {
       delete next.mcpServers.cavemem;
       if (Object.keys(next.mcpServers).length === 0) delete next.mcpServers;
     }
-    // Ensure the bundled bridge plugin is listed so OpenCode auto-loads it.
-    // Plugins in plugins/ also auto-load, but listing in `plugin` makes intent
-    // explicit and survives plugin-dir overrides.
-    const pluginList = Array.from(new Set([...(next.plugin ?? []), 'file://./plugins/cavemem.js']));
-    next.plugin = pluginList;
+    withoutBridgeEntries(next, pluginLink(ctx));
     writeJson(path, next);
     messages.push(`wrote ${path}`);
 
@@ -245,10 +264,7 @@ export const openCode: Installer = {
         delete current.mcpServers.cavemem;
         if (Object.keys(current.mcpServers).length === 0) delete current.mcpServers;
       }
-      if (current.plugin) {
-        current.plugin = current.plugin.filter((p) => p !== 'file://./plugins/cavemem.js');
-        if (current.plugin.length === 0) delete current.plugin;
-      }
+      withoutBridgeEntries(current, pluginLink(ctx));
       writeJson(path, current);
       messages.push(`updated ${path}`);
     }
