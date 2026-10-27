@@ -38,6 +38,8 @@ Everything else goes through a PR that **Erick** merges. Never merge your own PR
 
 Companion Core status lives in OpenProject (`http://neuromancer:8000`). Sub-projects: Hermes / Identity / Infrastructure / Memory (fork tooling like this lands under Infrastructure or Memory). API reference: `companion-ops/docs/openproject-api-reference.md`.
 
+cavemem work packages are exempt from the workspace rule that every new WP goes under an Epic: the work is infrequent and scoped tightly enough that an Epic is overkill. File them directly under the sub-project, and don't flag a missing parent.
+
 **On completing any unit of work:**
 1. Identify the relevant OpenProject work package. If the task was scoped from an existing WP, use its ID. If none exists, create one under the correct sub-project before closing out — nothing should complete without a WP.
 2. Update the work package status field to reflect current state.
