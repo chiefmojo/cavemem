@@ -90,7 +90,10 @@ export function registerInstallCommand(program: Command): void {
       );
       process.stdout.write(`${kleur.bold('what to try next:')}\n`);
       process.stdout.write(
-        `  ${kleur.cyan('cavemem status')}        show wiring + embedding backfill\n`,
+        `  ${kleur.cyan('cavemem status')}        show wiring + ${
+          // Remote status probes the server; embedding runs there, so it has no backfill to show.
+          ctx.remote ? 'server connection' : 'embedding backfill'
+        }\n`,
       );
       process.stdout.write(
         ctx.remote
