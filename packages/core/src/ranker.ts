@@ -4,6 +4,18 @@ export interface RankItem {
   cosine?: number;
 }
 
+// A loop, not Math.min(...xs): spreading throws RangeError past ~125k arguments,
+// and the cosine list has one entry per embedded observation.
+function minMax(xs: number[]): [number, number] {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const x of xs) {
+    if (x < min) min = x;
+    if (x > max) max = x;
+  }
+  return [min, max];
+}
+
 /**
  * Normalize BM25 and cosine scores into [0, 1], then blend using alpha.
  * alpha=1 → pure keyword, alpha=0 → pure vector.
@@ -11,8 +23,8 @@ export interface RankItem {
 export function hybridRank(items: RankItem[], alpha: number): Array<{ id: number; score: number }> {
   const bm25s = items.map((x) => x.bm25 ?? 0);
   const cosines = items.map((x) => x.cosine ?? 0);
-  const [bmin, bmax] = [Math.min(...bm25s), Math.max(...bm25s)];
-  const [cmin, cmax] = [Math.min(...cosines), Math.max(...cosines)];
+  const [bmin, bmax] = minMax(bm25s);
+  const [cmin, cmax] = minMax(cosines);
   const bRange = bmax - bmin || 1;
   const cRange = cmax - cmin || 1;
 
