@@ -143,6 +143,30 @@ describe('install output', () => {
     expect(out()).toContain('/tmp/cavemem-install-local-test/models');
     expect(out()).not.toContain('computed on the server');
   });
+
+  it('describes status as the server connection in remote mode, not embedding backfill', async () => {
+    mocks.settings = settingsWithRemote('http://neuromancer:37777');
+    const out = capture();
+
+    await runInstall();
+
+    expect(out()).toContain('show wiring + server connection');
+    expect(out()).not.toContain('embedding backfill');
+  });
+
+  it('keeps the embedding backfill hint for status on a local-mode install', async () => {
+    mocks.settings = {
+      dataDir: '/tmp/cavemem-install-local-test',
+      remote: { url: '', token: '', timeoutMs: 1500 },
+      ides: {},
+      embedding: { provider: 'local', model: 'Xenova/all-MiniLM-L6-v2' },
+    };
+    const out = capture();
+
+    await runInstall();
+
+    expect(out()).toContain('show wiring + embedding backfill');
+  });
 });
 
 async function runInstall(): Promise<void> {
