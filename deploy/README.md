@@ -85,8 +85,11 @@ env -i PATH=/usr/local/bin:/usr/bin:/bin node --version   # confirm >= 20
 ### 1b. Install the release
 
 ```bash
-ssh agentops@neuromancer 'npm install -g @chiefmojo/cavemem@<version> && cavemem --version'
+ssh agentops@neuromancer 'npm install -g @chiefmojo/cavemem@<version> && /home/agentops/.local/bin/cavemem --version'
 ```
+
+A non-interactive ssh command does not load the shell profile, so
+`~/.local/bin` is not on `PATH` and a bare `cavemem` is not found.
 
 Record the release's provenance now — the §5 comment needs it: `cavemem
 --version` from the server, and the `main` commit the release was cut from
