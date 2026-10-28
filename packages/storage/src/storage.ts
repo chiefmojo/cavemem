@@ -107,6 +107,22 @@ function openDb(dbPath: string, opts: { readonly?: boolean } = {}): DbHandle {
   };
 }
 
+interface EmbeddingBlobRow {
+  observation_id: number;
+  vec: Buffer;
+}
+
+// Copy into a fresh buffer: the row's Buffer may alias driver memory that is
+// reused once the statement finishes.
+function decodeEmbeddingRow(r: EmbeddingBlobRow): { observation_id: number; vec: Float32Array } {
+  return {
+    observation_id: r.observation_id,
+    vec: new Float32Array(
+      new Uint8Array(r.vec.buffer, r.vec.byteOffset, r.vec.byteLength).slice().buffer,
+    ),
+  };
+}
+
 export interface StorageOptions {
   readonly?: boolean;
 }
@@ -426,6 +442,70 @@ export class Storage {
         new Uint8Array(r.vec.buffer, r.vec.byteOffset, r.vec.byteLength).slice().buffer,
       ),
     }));
+  }
+
+  // The four paging queries below share one row predicate: model, dim, and a
+  // blob exactly dim floats long. A row failing it is invisible to all four, so
+  // embeddingCount and embeddingIds always agree about what the cache can hold.
+  // Plain prepare/all (no iterate) so both backends behave the same.
+
+  embeddingsAfter(
+    model: string,
+    dim: number,
+    afterId: number,
+    limit: number,
+  ): Array<{ observation_id: number; vec: Float32Array }> {
+    const rows = this.db
+      .prepare(
+        `SELECT observation_id, vec FROM embeddings
+         WHERE model = ? AND dim = ? AND length(vec) = ? AND observation_id > ?
+         ORDER BY observation_id
+         LIMIT ?`,
+      )
+      .all(model, dim, dim * 4, afterId, limit) as EmbeddingBlobRow[];
+    return rows.map(decodeEmbeddingRow);
+  }
+
+  embeddingCount(model: string, dim: number): number {
+    const row = this.db
+      .prepare(
+        'SELECT COUNT(*) AS n FROM embeddings WHERE model = ? AND dim = ? AND length(vec) = ?',
+      )
+      .get(model, dim, dim * 4) as { n: number };
+    return row.n;
+  }
+
+  embeddingIds(model: string, dim: number): number[] {
+    const rows = this.db
+      .prepare(
+        `SELECT observation_id FROM embeddings
+         WHERE model = ? AND dim = ? AND length(vec) = ?
+         ORDER BY observation_id`,
+      )
+      .all(model, dim, dim * 4) as Array<{ observation_id: number }>;
+    return rows.map((r) => r.observation_id);
+  }
+
+  embeddingsByIds(
+    model: string,
+    dim: number,
+    ids: number[],
+  ): Array<{ observation_id: number; vec: Float32Array }> {
+    const out: Array<{ observation_id: number; vec: Float32Array }> = [];
+    // Stay well under SQLite's bound-variable limit.
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const marks = chunk.map(() => '?').join(',');
+      const rows = this.db
+        .prepare(
+          `SELECT observation_id, vec FROM embeddings
+           WHERE model = ? AND dim = ? AND length(vec) = ? AND observation_id IN (${marks})
+           ORDER BY observation_id`,
+        )
+        .all(model, dim, dim * 4, ...chunk) as EmbeddingBlobRow[];
+      for (const r of rows) out.push(decodeEmbeddingRow(r));
+    }
+    return out;
   }
 
   observationsMissingEmbeddings(limit = 100, model?: string): ObservationRow[] {
