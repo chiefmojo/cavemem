@@ -5,6 +5,7 @@ import { defaultSettings } from '@cavemem/config';
 import { MemoryStore } from '@cavemem/core';
 import type { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { SearchHealth } from '../src/search-health.js';
 import { getOrCreateToken } from '../src/security.js';
 import { buildApp } from '../src/server.js';
 
@@ -527,6 +528,26 @@ describe('POST /api/hooks/:event', () => {
     expect(((await end.json()) as { ok: boolean }).ok).toBe(true);
     expect(store.storage.listSummaries('h3').filter((s) => s.scope === 'session')).toHaveLength(1);
     expect(store.storage.getSession('h3')?.ended_at).not.toBeNull();
+  });
+
+  it('POST /api/hooks/session-start returns the health warning', async () => {
+    const health = new SearchHealth({ log: () => {} });
+    for (let i = 0; i < 3; i++) health.recordFailure('scan thread down');
+    const warned = buildApp(store, { port: PORT, token: TOKEN, health });
+    const post = (a: Hono) =>
+      a.request('/api/hooks/session-start', {
+        method: 'POST',
+        headers: {
+          host: HOST,
+          authorization: `Bearer ${TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ session_id: 'hw', ide: 'claude-code', source: 'clear' }),
+      });
+    const body = (await (await post(warned)).json()) as { warning?: string };
+    expect(body.warning).toMatch(/^cavemem: hybrid search failing/);
+    const healthy = (await (await post(app)).json()) as Record<string, unknown>;
+    expect('warning' in healthy).toBe(false);
   });
 
   it('returns a failed HookResult with HTTP 200 when a handler fails', async () => {

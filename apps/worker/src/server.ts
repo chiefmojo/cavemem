@@ -170,7 +170,10 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
     if (!body || typeof body !== 'object' || typeof (body as HookInput).session_id !== 'string') {
       return c.json({ error: 'session_id is required' }, 400);
     }
-    const result = await runHook(event as HookName, body as HookInput, { store });
+    const result = await runHook(event as HookName, body as HookInput, {
+      store,
+      sessionWarning: () => opts.health?.warning(),
+    });
     return c.json(result);
   });
 

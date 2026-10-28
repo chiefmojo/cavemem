@@ -56,5 +56,7 @@ export interface HookResult {
   ok: boolean;
   ms: number;
   context?: string;
+  /** Server-side health notice for the user; surfaced by the CLI, never fed to the agent. */
+  warning?: string;
   error?: string;
 }

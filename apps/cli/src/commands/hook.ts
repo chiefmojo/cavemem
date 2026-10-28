@@ -60,18 +60,31 @@ export function registerHookCommand(program: Command): void {
 }
 
 function writeIdeOutput(hook: HookName, result: HookResult): void {
-  // Only SessionStart and UserPromptSubmit can usefully feed text back into
-  // the agent. For other hooks we deliberately stay silent on stdout.
-  if (hook !== 'session-start' && hook !== 'user-prompt-submit') return;
+  const payload = ideOutputPayload(hook, result);
+  if (payload) process.stdout.write(`${JSON.stringify(payload)}\n`);
+}
+
+/**
+ * What the IDE protocol gets on stdout, or undefined to stay silent. Only
+ * SessionStart and UserPromptSubmit can usefully feed text back into the
+ * agent. `systemMessage` is shown to the user and kept out of the model's
+ * context, so the search-health warning travels there, at session start only.
+ */
+export function ideOutputPayload(
+  hook: HookName,
+  result: HookResult,
+): Record<string, unknown> | undefined {
+  if (hook !== 'session-start' && hook !== 'user-prompt-submit') return undefined;
+  const payload: Record<string, unknown> = {};
+  if (hook === 'session-start' && result.warning) payload.systemMessage = result.warning;
   const ctx = result.context?.trim();
-  if (!ctx) return;
-  const payload = {
-    hookSpecificOutput: {
+  if (ctx) {
+    payload.hookSpecificOutput = {
       hookEventName: CLAUDE_EVENT_NAME[hook],
       additionalContext: ctx,
-    },
-  };
-  process.stdout.write(`${JSON.stringify(payload)}\n`);
+    };
+  }
+  return Object.keys(payload).length ? payload : undefined;
 }
 
 // Augment's hook payloads use different field names than Claude Code's
