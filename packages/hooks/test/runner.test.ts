@@ -463,6 +463,20 @@ describe('runHook — remote mode', () => {
     expect(existsSync(join(home, 'data.db'))).toBe(false);
   });
 
+  it('session-start passes the server warning through', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ ok: true, warning: 'cavemem: test warning' }), {
+            status: 200,
+          }),
+      ),
+    );
+    const r = await remoteRunHook('session-start', { session_id: 'r-warn', ide: 'claude-code' });
+    expect(r.warning).toBe('cavemem: test warning');
+  });
+
   it('spools on network failure and still returns ok', async () => {
     vi.stubGlobal(
       'fetch',
