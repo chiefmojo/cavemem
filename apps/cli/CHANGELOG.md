@@ -1,5 +1,16 @@
 # cavemem
 
+## 0.5.0
+
+### Minor Changes
+
+- 6064b37: Hybrid search on the worker now runs on a background thread, so a large corpus no longer stalls hooks, the viewer and other requests while a search scans vectors, and the search itself is faster. When hybrid search p95 goes over 300 ms or searches keep failing, Claude Code shows a warning at session start (this needs the server and the client both on this version or later; local mode never shows it). `search.alpha = 1` now returns keyword hits only, with raw BM25 scores, instead of padding the result with unrelated vector-only hits.
+
+### Patch Changes
+
+- 6064b37: The worker no longer re-reads every stored embedding every two seconds while idle, which used to stall other requests (hooks, the viewer, searches) for a few hundred milliseconds on large stores.
+- 6064b37: Redact private content and credentials from retained search-health diagnostics before truncating them, protecting structured logs and session-start warnings. Diagnostics also catch credentials in quoted JSON fields (`"api_key": "…"`), as provider error bodies carry them; redaction of stored observations is unchanged. Keep scan-thread and malformed-embedding test fixtures compatible with Node 20.
+
 ## 0.4.8
 
 ### Patch Changes

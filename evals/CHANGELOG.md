@@ -1,5 +1,12 @@
 # @cavemem/evals
 
+## 0.5.0
+
+### Patch Changes
+
+- Updated dependencies [6064b37]
+  - @cavemem/compress@0.5.0
+
 ## 0.3.0
 
 ### Patch Changes
