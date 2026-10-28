@@ -95,7 +95,7 @@ Unit tests cover handlers, storage, and protocol contracts in isolation. They ca
 
 - `bash scripts/e2e-publish.sh` — covers the **changeset publish** path (what `pnpm release` ships). Builds, packs (mirroring what `changeset publish` ships), installs into an isolated `.e2e/` prefix with an isolated `$HOME`, drives every Claude Code hook event with a realistic payload, exercises FTS search and the MCP server, then uninstalls. Self-cleans on success. Required to pass before `pnpm release` runs.
 - `bash scripts/e2e-pack-release.sh` — covers the **`pnpm publish:release`** path (legacy bespoke flow that uses `apps/cli/scripts/pack-release.mjs` to write `apps/cli/release/`). Run this if you change `pack-release.mjs` or the `dependencies` block of `apps/cli/package.json`.
-- `bash scripts/e2e-remote.sh` — covers remote mode: server + client on one box through the packed artifact, all hook events, spool/drain, MCP over HTTP. Required alongside `e2e-publish.sh`.
+- `bash scripts/e2e-remote.sh` — covers remote mode: server + client on one box through the packed artifact, all hook events, spool/drain, MCP over HTTP. Step 16 also runs hybrid MCP search through the scan thread from the packed binary (a stub embedder on loopback), including a query only a vector scan can answer; it is the guard against the thread entry not shipping. Required alongside `e2e-publish.sh`.
 - The 15 numbered checks in `e2e-publish.sh` must stay green. If you change anything in `apps/cli/`, `packages/installers/`, the hook handler stdout/stderr contract, or the publish surface, re-run it locally before opening a PR.
 - Touching the tsup config, the `prepublishOnly` script, or the bin entrypoint guards (`isMainEntry()`) without re-running both scripts is a defect.
 

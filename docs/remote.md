@@ -45,8 +45,8 @@ SQLite contention does not arise: one process owns the store and is the only wri
 
 The server watches its own hybrid search (the vector scan behind the MCP `search` tool) and says so when it is not holding up. A warning appears in either of two cases:
 
-- Latency: `cavemem: hybrid search p95 <n> ms is over the 300 ms budget at <count> vectors. The exact vector scan has reached its ceiling.` The p95 is taken over the last 50 searches, needs at least 20 before it counts, and measures the scan itself, not time spent queued behind another search.
-- Failures: `cavemem: hybrid search failing (<n> of last 20): <last error>`. It appears once 3 of the last 20 searches have failed.
+- Latency: `cavemem: hybrid search p95 <n> ms is over the 300 ms budget at <count> vectors. The exact vector scan has reached its ceiling.` The p95 is taken over the last 50 hybrid searches, not counting ones that waited on the initial load, needs at least 20 before it counts, and measures the scan itself, not time spent queued behind another search.
+- Failures: `cavemem: hybrid search failing (<n> of last 20): <last error>`. It appears once 3 of the last 20 hybrid searches have failed.
 
 If both hold, both lines are shown.
 
