@@ -12,7 +12,7 @@
 - **Reads honor progressive disclosure.** `timeline()` always returns compressed content; `getObservations()` expands only when `opts.expand` (defaulting to `settings.compression.expandForModel`) says so.
 - **Search is dependency-inverted.** `MemoryStore.search(query, limit?, embedder?)` takes an optional `Embedder` *parameter* rather than importing `@cavemem/embedding` — that keeps `core` and `embedding` siblings (both consume config + storage, neither depends on the other). `Embedder` is defined structurally in `memory-store.ts`; any object with `{ model, dim, embed }` satisfies it.
 - **Graceful degradation.** Search falls back to pure keyword (BM25/FTS) whenever there is no embedder, `settings.embedding.provider === 'none'`, no vectors exist for the embedder's `{model, dim}`, or the provider's returned vector length disagrees with its declared `dim`.
-- **Pure, testable helpers.** `hybridRank`/`cosine` in `ranker.ts` are stateless functions with no I/O.
+- **Pure, testable helpers.** `hybridRank`/`cosine` in `ranker.ts` are stateless functions with no I/O. `vector-scan.ts` holds the pure scan kernel (`normalizeInto`, `scanContiguous`) plus the `VectorIndex`/`VectorSummary` types, which let a caller run the vector scan elsewhere (the worker's scan thread) and hand `MemoryStore.search` only the summary; `rankFromSummary` in `ranker.ts` ranks from it.
 
 ## Flow
 

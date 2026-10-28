@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-The worker's four modules: `server.ts` (Hono app + process lifecycle), `embed-loop.ts` (background embedding backfill with observable state), `security.ts` (Host/Origin allowlist, bearer auth, and the viewer nonce/cookie handshake), and `viewer.ts` (server-rendered read-only HTML).
+The worker's four modules: `server.ts` (Hono app + process lifecycle), `embed-loop.ts` (background embedding backfill with observable state), `security.ts` (Host/Origin allowlist, bearer auth, and the viewer nonce/cookie handshake), and `viewer.ts` (server-rendered read-only HTML). Hybrid search runs off the event loop in four more: `scan-client.ts`, `scan-thread.ts`, `vector-cache.ts` and `search-health.ts`.
 
 ## Design
 
@@ -24,6 +24,13 @@ The worker's four modules: `server.ts` (Hono app + process lifecycle), `embed-lo
 - `processOnce()` claims up to `settings.embedding.batchSize` rows via `observationsMissingEmbeddings(batchSize, model)`, embeds `expand(row.content)`, persists via `putEmbedding(row.id, model, vec)`; on embed failure it records `state.lastError`, logs, and breaks the batch (retried on the next tick rather than infinite per-row retry).
 - Every batch ends with counter refresh (`countEmbeddings`/`countObservations`) and a snapshot write to `stateFilePath(settings)` = `<dataDir>/worker.state.json` (`writeFileSync`, best-effort — failures only mean stale status data).
 - Idle logic: when a poll yields no work, the loop sleeps `idleTickMs` (default 2 s) and exits via `onIdleExit` once `idleShutdownMs` (clamped ≥ 0; `0` = never exit) has passed with **both** no embed work and no HTTP traffic (`state.lastHttpAt`, bumped by `touch()`).
+
+### scan-client.ts, scan-thread.ts, vector-cache.ts, search-health.ts
+
+- `scan-client.ts` — `ScanClient implements VectorIndex` (from `@cavemem/core`): spawns the thread from `new URL('./scan-thread.js', import.meta.url)`, keeps one request in flight with a client-side FIFO (`queuedMs`), bounds the initial load with a timeout, and on any failure rejects everything pending and drops the thread; the next call respawns it. Logs `scan-thread-exit` and `scan-thread-load-timeout` as structured lines.
+- `scan-thread.ts` — the thread entry: opens its own `Storage` handle, builds a `VectorCache`, and answers `summarize` requests with a `VectorSummary`. It is a separate build entry in both `apps/worker` and `apps/cli` (tsup), checked by `apps/cli/scripts/verify-dist.mjs`.
+- `vector-cache.ts` — `VectorCache`: normalized embeddings for one `(model, dim)` in a contiguous `Float32Array`, loaded and refreshed in pages through public `Storage` reads.
+- `search-health.ts` — `SearchHealth`: rolling p95 of scan service time and a failure window; `warning()` returns the session-start text and transitions are logged once per condition.
 
 ### security.ts
 

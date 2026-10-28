@@ -50,7 +50,9 @@ TGZ="$PACK/chiefmojo-cavemem-$VERSION.tgz"
 test -f "$TGZ" || { echo "tarball missing at $TGZ"; ls "$PACK"; exit 1; }
 
 echo "==> 4. inspect tarball contents"
-tar -tzf "$TGZ" | sort
+TARBALL_LIST=$(tar -tzf "$TGZ" | sort)
+echo "$TARBALL_LIST"
+echo "$TARBALL_LIST" | grep -qx "package/dist/scan-thread.js" || { echo "tarball is missing package/dist/scan-thread.js"; exit 1; }
 
 echo "==> 5. install -g into isolated prefix"
 npm install --prefix "$PREFIX" --global "$TGZ" >/dev/null

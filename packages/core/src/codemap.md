@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Source of `@cavemem/core`: five modules that together implement the domain facade. `memory-store.ts` is the heart — the only sanctioned write path into the database and the search/ranking entry point; `types.ts` holds the domain models; `ranker.ts` the pure hybrid-scoring math; `ids.ts` the session-ID scheme; `index.ts` the public barrel.
+Source of `@cavemem/core`: six modules that together implement the domain facade. `memory-store.ts` is the heart — the only sanctioned write path into the database and the search/ranking entry point; `types.ts` holds the domain models; `ranker.ts` the pure hybrid-scoring math; `ids.ts` the session-ID scheme; `vector-scan.ts` the vector scan kernel and the `VectorIndex`/`VectorSummary` seam; `index.ts` the public barrel.
 
 ## Design
 
@@ -12,6 +12,7 @@ Source of `@cavemem/core`: five modules that together implement the domain facad
   - `ensureSession(id)` is a private idempotency guard: it re-issues `storage.createSession` before every child insert because Claude Code does not guarantee `SessionStart` fires first (installing mid-session, hook-chain failure, resumed sessions); without it, inserts fail the foreign-key constraint. It always writes `ide: 'unknown'`, `cwd: null`, `metadata: null` — it materializes the row for the foreign key only and never carries caller metadata.
   - Reads: `toObservation(row, expand)` converts storage rows; `compressed` is reported as `!expand && row.compressed === 1`; `metadata` goes through `safeParse` (JSON parse failure → `null`, never throws).
 - **`ranker.ts`** — `hybridRank(items, alpha)` min-max normalizes the BM25 and cosine populations independently into `[0, 1]` (a flat population uses range `1` via `|| 1` to avoid divide-by-zero), then blends `score = alpha * b + (1 - alpha) * c` and sorts descending; `alpha=1` → pure keyword, `alpha=0` → pure vector. `cosine(a, b)` iterates the shorter length with per-element `?? 0` guards and returns `0` on zero-norm denominators.
+- **`vector-scan.ts`** — `normalizeInto(dst, offset, src, dim)` writes a unit-length row (zero or non-finite norm → zeros, so cosine 0 instead of NaN); `scanContiguous` is one dot-product pass over pre-normalized rows; `VectorIndex` is the interface `MemoryStore.search` accepts via `SearchOptions.index` to scan off-thread, returning a `VectorSummary` (global cosine range and top-k). `rankFromSummary` (in `ranker.ts`) blends it with the keyword hits. With `alpha = 1` search is keyword-only: raw BM25 scores, no vector-only padding.
 - **`types.ts`** — `Observation` (id, session_id, kind, content, compressed, intensity, ts, metadata), `Session`, `SearchResult` (compact shape: id, session_id, snippet, score, ts — this is the MCP progressive-disclosure payload), `GetObservationsOptions { expand? }`.
 - **`ids.ts`** — `createSessionId()` = `sess_<Date.now() in base36>_<4 random bytes as hex>` via `node:crypto`; time-sortable prefix plus entropy suffix.
 - **`index.ts`** — public barrel: `MemoryStore` + `Embedder`, `hybridRank` (note: `cosine` is *not* exported), the four domain types, `createSessionId`.

@@ -9,8 +9,8 @@
     "cavemem-worker": "./dist/server.js"
   },
   "scripts": {
-    "build": "tsup src/server.ts --format esm --dts --clean",
-    "dev": "tsup src/server.ts --format esm --dts --watch",
+    "build": "tsup src/server.ts src/scan-thread.ts --format esm --dts --clean",
+    "dev": "tsup src/server.ts src/scan-thread.ts --format esm --dts --watch",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

@@ -111,7 +111,8 @@ Unit tests cover handlers, storage, and protocol contracts in isolation. They ca
 ## Performance budgets
 
 - Hook handler p95 runtime: 150 ms.
-- `search` MCP call p95: 50 ms for up to 50k observations.
+- Hybrid MCP `search` on the worker: p95 at or under 300 ms for a single search, measured sequentially. When it stops holding, the session-start warning fires; the expected ceiling is ~250–300k embeddings.
+- A search never blocks the worker's event loop: during back-to-back searches a `GET /api/sessions` probe stays near idle (p95 at or under 20 ms).
 - Compression throughput: ≥ 5 MB/s on one core.
 - Worker cold start: ≤ 500 ms on Node, ≤ 100 ms on Bun.
 

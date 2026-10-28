@@ -7,13 +7,19 @@ import { verifyDist } from '../scripts/verify-dist.mjs';
 const GOOD_BRIDGE =
   'export default { id: "cavemem", setup: async () => {}, server: async () => ({}) };\n';
 
-function writeCli(root: string, opts: { version: string; distVersion: string; bridge?: string }) {
+function writeCli(
+  root: string,
+  opts: { version: string; distVersion: string; bridge?: string; scanThread?: boolean },
+) {
   writeFileSync(join(root, 'package.json'), JSON.stringify({ version: opts.version }));
   mkdirSync(join(root, 'dist'), { recursive: true });
   writeFileSync(
     join(root, 'dist', 'index.js'),
     `process.stdout.write(${JSON.stringify(`${opts.distVersion}\n`)});\n`,
   );
+  if (opts.scanThread !== false) {
+    writeFileSync(join(root, 'dist', 'scan-thread.js'), 'export {};\n');
+  }
   if (opts.bridge !== undefined) {
     writeFileSync(join(root, 'dist', 'opencodeBridge.js'), opts.bridge);
   }
@@ -42,6 +48,19 @@ describe('verifyDist', () => {
     expect(failures).toHaveLength(1);
     expect(failures[0]).toMatch(/0\.4\.3/);
     expect(failures[0]).toMatch(/0\.4\.4/);
+  });
+
+  it('fails when dist/scan-thread.js is missing', async () => {
+    // ScanClient resolves it next to its chunk at runtime; absent, hybrid search dies on first use.
+    writeCli(root, {
+      version: '0.4.5',
+      distVersion: '0.4.5',
+      bridge: GOOD_BRIDGE,
+      scanThread: false,
+    });
+    const failures = await verifyDist(root);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain('dist/scan-thread.js missing');
   });
 
   it('rejects a missing dist', async () => {
