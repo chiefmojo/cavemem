@@ -231,8 +231,12 @@ mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersi
 mcp_call '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null
 # The tool result is a JSON hit list inside the envelope, which may arrive as one SSE data: line.
 parse_hits='let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const line=d.split("\n").find(l=>l.startsWith("data:"));const env=JSON.parse(line?line.slice(5):d);if(env.error||env.result.isError){console.error("search error: "+JSON.stringify(env.error??env.result));process.exit(1)}const hits=JSON.parse(env.result.content[0].text);if(!Array.isArray(hits)||hits.length===0){console.error("no hits");process.exit(1)}console.log("hits="+hits.length)})'
-for q in hosts migration; do
+# zzqvectoronly matches nothing in FTS, so keyword fallback returns no hits for
+# it: only a vector scan over the cached rows can (the stub never returns a
+# zero vector).
+for q in hosts migration zzqvectoronly; do
   REQ="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"search\",\"arguments\":{\"query\":\"$q\"}}}"
+  printf '%s: ' "$q"
   mcp_call "$REQ" | node -e "$parse_hits" || { echo "hybrid MCP search '$q' failed"; cat "$WORK/worker2.log"; exit 1; }
 done
 
