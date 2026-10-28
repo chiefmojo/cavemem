@@ -131,14 +131,14 @@ describe('SearchHealth logging', () => {
     feed(h, 20, 400);
     expect(log).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenLastCalledWith(
-      expect.objectContaining({ event: 'search-health', state: 'warning' }),
+      expect.objectContaining({ event: 'search-health', condition: 'latency', state: 'warning' }),
     );
     feed(h, 10, 400);
     expect(log).toHaveBeenCalledTimes(1);
     feed(h, 50, 10);
     expect(log).toHaveBeenCalledTimes(2);
     expect(log).toHaveBeenLastCalledWith(
-      expect.objectContaining({ event: 'search-health', state: 'ok' }),
+      expect.objectContaining({ event: 'search-health', condition: 'latency', state: 'ok' }),
     );
     feed(h, 5, 10);
     expect(log).toHaveBeenCalledTimes(2);
@@ -149,6 +149,62 @@ describe('SearchHealth logging', () => {
     const h = new SearchHealth({ log });
     for (let i = 0; i < 5; i++) h.recordFailure('boom');
     expect(log).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith(expect.objectContaining({ state: 'warning' }));
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ condition: 'failures', state: 'warning' }),
+    );
+  });
+
+  // 19 slow samples leave latency one sample short of the floor; 3 failures
+  // then raise the failure warning; the 20th slow sample tips latency over.
+  function failuresUpLatencyJustShort(log: ReturnType<typeof vi.fn>): SearchHealth {
+    const h = new SearchHealth({ log });
+    feed(h, 19, 400);
+    for (let i = 0; i < 3; i++) h.recordFailure('boom');
+    return h;
+  }
+
+  it('logs a condition that starts while the other already holds', () => {
+    const log = vi.fn();
+    const h = failuresUpLatencyJustShort(log);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenLastCalledWith(
+      expect.objectContaining({ condition: 'failures', state: 'warning' }),
+    );
+    log.mockClear();
+    feed(h, 1, 400);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'search-health', condition: 'latency', state: 'warning' }),
+    );
+  });
+
+  it('logs only the condition that cleared while the other still holds', () => {
+    const log = vi.fn();
+    const h = failuresUpLatencyJustShort(log);
+    feed(h, 1, 400);
+    log.mockClear();
+    // Slow successes keep latency up while the failures age out of the window.
+    feed(h, 16, 400);
+    expect(log).not.toHaveBeenCalled();
+    feed(h, 1, 400);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ condition: 'failures', state: 'ok' }),
+    );
+    expect(h.warning()).toContain('p95');
+    expect(h.warning()).not.toContain('failing');
+  });
+
+  it('writes nothing when neither condition changes', () => {
+    const log = vi.fn();
+    const h = new SearchHealth({ log });
+    feed(h, 30, 10);
+    expect(log).not.toHaveBeenCalled();
+    feed(h, 20, 400);
+    for (let i = 0; i < 3; i++) h.recordFailure('boom');
+    log.mockClear();
+    h.recordFailure('boom again');
+    feed(h, 1, 400);
+    expect(log).not.toHaveBeenCalled();
   });
 });

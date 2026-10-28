@@ -34,7 +34,8 @@ export class SearchHealth {
   private latestCount = 0;
   private outcomes: boolean[] = [];
   private lastFailure = '';
-  private warned = false;
+  private latencyWarned = false;
+  private failureWarned = false;
 
   constructor(opts: SearchHealthOptions = {}) {
     this.budgetMs = opts.budgetMs ?? 300;
@@ -70,20 +71,26 @@ export class SearchHealth {
   }
 
   warning(): string | undefined {
-    const lines: string[] = [];
-    const p95 = this.p95();
-    if (p95 !== undefined && p95 > this.budgetMs) {
-      lines.push(
-        `cavemem: hybrid search p95 ${Math.round(p95)} ms is over the ${this.budgetMs} ms budget at ${this.latestCount} vectors. The exact vector scan has reached its ceiling.`,
-      );
-    }
-    const failures = this.outcomes.filter(Boolean).length;
-    if (failures >= this.failThreshold) {
-      lines.push(
-        `cavemem: hybrid search failing (${failures} of last ${this.failWindow}): ${this.lastFailure}`,
-      );
-    }
+    const lines = [this.latencyWarning(), this.failureWarning()].filter(
+      (l): l is string => l !== undefined,
+    );
     return lines.length ? lines.join('\n') : undefined;
+  }
+
+  private latencyWarning(): string | undefined {
+    const p95 = this.p95();
+    if (p95 === undefined || p95 <= this.budgetMs) return undefined;
+    return `cavemem: hybrid search p95 ${Math.round(p95)} ms is over the ${this.budgetMs} ms budget at ${this.latestCount} vectors. The exact vector scan has reached its ceiling.`;
+  }
+
+  private failureCount(): number {
+    return this.outcomes.filter(Boolean).length;
+  }
+
+  private failureWarning(): string | undefined {
+    const failures = this.failureCount();
+    if (failures < this.failThreshold) return undefined;
+    return `cavemem: hybrid search failing (${failures} of last ${this.failWindow}): ${this.lastFailure}`;
   }
 
   private pushOutcome(failed: boolean): void {
@@ -91,19 +98,31 @@ export class SearchHealth {
     if (this.outcomes.length > this.failWindow) this.outcomes.shift();
   }
 
-  // Log on entering and leaving the warning state only: a search path that is
-  // slow for an hour would otherwise write a line per query.
+  // One line when each condition starts or stops holding, so a second
+  // condition arriving while the first is up is still reported, and a search
+  // path that stays slow for an hour does not write a line per query.
   private checkCrossing(): void {
-    const warning = this.warning();
-    const warned = warning !== undefined;
-    if (warned === this.warned) return;
-    this.warned = warned;
-    const p95 = this.p95();
-    this.log({
-      event: 'search-health',
-      state: warned ? 'warning' : 'ok',
-      ...(p95 !== undefined ? { p95Ms: Math.round(p95) } : {}),
-      ...(warning ? { warning } : {}),
-    });
+    const latency = this.latencyWarning();
+    if ((latency !== undefined) !== this.latencyWarned) {
+      this.latencyWarned = latency !== undefined;
+      const p95 = this.p95();
+      this.log({
+        event: 'search-health',
+        condition: 'latency',
+        state: this.latencyWarned ? 'warning' : 'ok',
+        ...(p95 !== undefined ? { p95Ms: Math.round(p95), count: this.latestCount } : {}),
+      });
+    }
+    const failure = this.failureWarning();
+    if ((failure !== undefined) !== this.failureWarned) {
+      this.failureWarned = failure !== undefined;
+      this.log({
+        event: 'search-health',
+        condition: 'failures',
+        state: this.failureWarned ? 'warning' : 'ok',
+        failures: this.failureCount(),
+        ...(this.failureWarned ? { lastError: this.lastFailure } : {}),
+      });
+    }
   }
 }
