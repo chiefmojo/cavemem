@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Storage } from '../src/index.js';
 
@@ -503,16 +503,7 @@ describe('Storage embedding paging', () => {
   // putEmbedding always writes dim = vec.length, so a blob whose length
   // disagrees with dim can only come from a raw insert.
   function insertMalformed(observationId: number): void {
-    const require = createRequire(import.meta.url);
-    const emit = process.emitWarning;
-    process.emitWarning = () => {};
-    let DatabaseSync: typeof import('node:sqlite').DatabaseSync;
-    try {
-      ({ DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite'));
-    } finally {
-      process.emitWarning = emit;
-    }
-    const raw = new DatabaseSync(join(dir, 'test.db'));
+    const raw = new Database(join(dir, 'test.db'));
     try {
       raw
         .prepare('INSERT INTO embeddings(observation_id, model, dim, vec) VALUES (?, ?, ?, ?)')

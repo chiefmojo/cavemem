@@ -207,11 +207,18 @@ describe('ScanClient', () => {
   it('a normal load clears the load timer', async () => {
     addEmbedded(5);
     const log = vi.fn();
-    const client = makeClient({ loadTimeoutMs: 1_500, log });
-    await client.summarize(Q, [], 3);
-    await new Promise((r) => setTimeout(r, 1_800));
-    expect(client.thread).toBeDefined();
-    expect(log).not.toHaveBeenCalled();
+    // Source transpilation time varies by Node version and host load; advance
+    // only the client's timers after the real worker has finished loading.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const client = makeClient({ loadTimeoutMs: 1_500, log });
+      await client.summarize(Q, [], 3);
+      vi.advanceTimersByTime(1_800);
+      expect(client.thread).toBeDefined();
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('close rejects pending and leaves no live thread', async () => {

@@ -97,6 +97,16 @@ describe('redactPrivate', () => {
 });
 
 describe('redactSecrets', () => {
+  it('redacts credential values with quoted field names in provider JSON', () => {
+    expect(redactSecrets('{"api_key":"fixture-key-1234567890","error":"invalid key"}')).toBe(
+      '{"api_key":"[REDACTED]","error":"invalid key"}',
+    );
+    expect(redactSecrets("{'password': 'hunter22222'}")).toBe("{'password': '[REDACTED]'}");
+    expect(redactSecrets('{"cacheKey":"cache-value-123","token":"identifier"}')).toBe(
+      '{"cacheKey":"cache-value-123","token":"identifier"}',
+    );
+  });
+
   it('redacts a Bearer token, keeping the "Bearer" prefix', () => {
     const out = redactSecrets(
       'curl -H "Authorization: Bearer abcdef123456.xyz789" https://api.example.com',

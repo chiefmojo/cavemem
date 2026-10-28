@@ -27,8 +27,9 @@ const SLACK_TOKEN_RE = /\bxox[baprs]-[A-Za-z0-9-]{10,72}\b/g;
 // alone misses them. Bare `key` requires a preceding `_`/`-` so camelCase
 // identifiers like `cacheKey` never match. The value alternates quoted (") /
 // quoted (') / bare so the closing quote is never swallowed by \S{8,}.
+// Allow a closing quote on the key too, as in JSON provider error bodies.
 const ASSIGNMENT_RE =
-  /\b([\w-]*(?:api[_-]?key|secret|token|password|passwd|authorization|[_-]key))(\s*[=:]\s*)(?:"([^"\s]{8,})"|'([^'\s]{8,})'|(\S{8,}))/gi;
+  /\b([\w-]*(?:api[_-]?key|secret|token|password|passwd|authorization|[_-]key))(["']?\s*[=:]\s*)(?:"([^"\s]{8,})"|'([^'\s]{8,})'|(\S{8,}))/gi;
 
 /**
  * True if `value` is secret-shaped enough to redact: long enough, and not

@@ -1,3 +1,5 @@
+import { redactPrivate, redactSecrets } from '@cavemem/compress';
+
 export interface SearchHealthOptions {
   /** p95 service time (ms) above which the scan is called out of headroom. */
   budgetMs?: number;
@@ -58,7 +60,7 @@ export class SearchHealth {
 
   recordFailure(message: string): void {
     this.pushOutcome(true);
-    this.lastFailure = message.slice(0, MAX_FAILURE_TEXT);
+    this.lastFailure = redactSecrets(redactPrivate(message)).slice(0, MAX_FAILURE_TEXT);
     this.checkCrossing();
   }
 

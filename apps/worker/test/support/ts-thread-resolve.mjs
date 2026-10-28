@@ -1,5 +1,7 @@
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const toSrc = (rel) => new URL(rel, import.meta.url).href;
 
@@ -26,4 +28,20 @@ export async function resolve(specifier, context, nextResolve) {
     }
   }
   return nextResolve(specifier, context);
+}
+
+export async function load(url, context, nextLoad) {
+  if (url.startsWith('file:') && url.endsWith('.ts')) {
+    const fileName = fileURLToPath(url);
+    const source = await readFile(fileName, 'utf8');
+    const { outputText } = ts.transpileModule(source, {
+      fileName,
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.ESNext,
+      },
+    });
+    return { format: 'module', source: outputText, shortCircuit: true };
+  }
+  return nextLoad(url, context);
 }

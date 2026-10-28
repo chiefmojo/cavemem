@@ -1,9 +1,11 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultSettings } from '@cavemem/config';
 import { type Embedder, MemoryStore, type VectorIndex } from '@cavemem/core';
+import { createEmbedder } from '@cavemem/embedding';
 import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -166,9 +168,19 @@ describe('hybrid search over /mcp', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  async function mount(index: VectorIndex, health: SearchHealth): Promise<Client> {
+  async function mount(
+    index: VectorIndex,
+    health: SearchHealth,
+    queryEmbedder = embedder,
+  ): Promise<Client> {
     port = await freePort();
-    const app = buildApp(store, { port, token: TOKEN, embedder, vectorIndex: index, health });
+    const app = buildApp(store, {
+      port,
+      token: TOKEN,
+      embedder: queryEmbedder,
+      vectorIndex: index,
+      health,
+    });
     server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' });
     return connect({ authorization: `Bearer ${TOKEN}` });
   }
@@ -215,6 +227,62 @@ describe('hybrid search over /mcp', () => {
       true,
     );
     await client.close();
+  });
+
+  it('scrubs provider errors from health logs and unrelated session-start warnings', async () => {
+    const apiKey = 'fixture-key-1234567890';
+    const query = 'cargo <private>private-query-marker</private>';
+    const provider = createHttpServer(async (req, res) => {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const input = (JSON.parse(body) as { input: string }).input;
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: input, api_key: req.headers.authorization?.slice(7) }));
+    });
+    await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve));
+    let client: Client | undefined;
+    try {
+      const address = provider.address();
+      if (!address || typeof address === 'string') throw new Error('no provider port');
+      const remote = await createEmbedder({
+        ...defaultSettings,
+        embedding: {
+          ...defaultSettings.embedding,
+          provider: 'openai',
+          model: 'text-embedding-3-small',
+          endpoint: `http://127.0.0.1:${address.port}`,
+          apiKey,
+        },
+      });
+      if (!remote) throw new Error('no embedder');
+      const logs: Record<string, unknown>[] = [];
+      const health = new SearchHealth({ log: (line) => logs.push(line) });
+      const unused: VectorIndex = { summarize: () => Promise.reject(new Error('unused')) };
+      client = await mount(unused, health, remote);
+      for (let i = 0; i < 3; i++) {
+        expect((await searchOverMcp(client, query)).isError).toBe(true);
+      }
+      const response = await fetch(`http://127.0.0.1:${port}/api/hooks/session-start`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ session_id: 'unrelated-session', cwd: '/other-project' }),
+      });
+      expect(response.status).toBe(200);
+      const result = (await response.json()) as { warning: string };
+      expect(result.warning).toContain('hybrid search failing (3 of last 20)');
+      expect(result.warning).toContain('OpenAI embed failed: 400');
+      expect(logs).toHaveLength(1);
+      for (const output of [result.warning, JSON.stringify(logs)]) {
+        expect(output).not.toContain('private-query-marker');
+        expect(output).not.toContain(apiKey);
+        expect(output).toContain('[REDACTED]');
+      }
+    } finally {
+      await client?.close();
+      await new Promise<void>((resolve, reject) =>
+        provider.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   });
 
   it('keyword-only searches record nothing', async () => {

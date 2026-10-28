@@ -62,16 +62,9 @@ function embed(ids: number[]): void {
 // putEmbedding always writes dim = vec.length, so a blob whose length
 // disagrees with dim can only come from a raw insert.
 function insertMalformed(observationId: number): void {
-  const require = createRequire(import.meta.url);
-  const emit = process.emitWarning;
-  process.emitWarning = () => {};
-  let DatabaseSync: typeof import('node:sqlite').DatabaseSync;
-  try {
-    ({ DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite'));
-  } finally {
-    process.emitWarning = emit;
-  }
-  const raw = new DatabaseSync(join(dir, 'test.db'));
+  const require = createRequire(new URL('../../../packages/storage/package.json', import.meta.url));
+  const Database = require('better-sqlite3');
+  const raw = new Database(join(dir, 'test.db'));
   try {
     raw
       .prepare('INSERT INTO embeddings(observation_id, model, dim, vec) VALUES (?, ?, ?, ?)')

@@ -82,6 +82,25 @@ describe('SearchHealth latency', () => {
 });
 
 describe('SearchHealth failures', () => {
+  it.each([
+    ['<private>private-marker</private> timeout', ' timeout', 'private-marker'],
+    ['timeout <PRIVATE>private-marker', 'timeout ', 'private-marker'],
+    ['invalid sk-test1234567890abcdefgh', 'invalid [REDACTED]', 'sk-test1234567890abcdefgh'],
+    [
+      `${'x'.repeat(185)} Bearer test-token-1234567890`,
+      `${'x'.repeat(185)} Bearer [REDACTED]`.slice(0, 200),
+      'test-token',
+    ],
+    [`<private>${'private-marker'.repeat(30)}</private> timeout`, ' timeout', 'private-marker'],
+  ])('scrubs diagnostics before retaining or logging: %s', (message, safe, secret) => {
+    const lines: Record<string, unknown>[] = [];
+    const h = new SearchHealth({ log: (line) => lines.push(line) });
+    for (let i = 0; i < 3; i++) h.recordFailure(message);
+    expect(h.warning()).toBe(`cavemem: hybrid search failing (3 of last 20): ${safe}`);
+    expect(lines).toEqual([expect.objectContaining({ condition: 'failures', lastError: safe })]);
+    expect(JSON.stringify(lines)).not.toContain(secret);
+  });
+
   it('failure warning at 3 of last 20, not at 2', () => {
     const h = new SearchHealth({ log: () => {} });
     h.recordFailure('boom');
