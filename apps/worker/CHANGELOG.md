@@ -1,5 +1,15 @@
 # @cavemem/worker
 
+## 0.5.0
+
+### Patch Changes
+
+- Updated dependencies [6064b37]
+  - @cavemem/compress@0.5.0
+  - @cavemem/mcp-server@0.5.0
+  - @cavemem/core@0.5.0
+  - @cavemem/hooks@0.5.0
+
 ## 0.4.0
 
 ### Minor Changes
