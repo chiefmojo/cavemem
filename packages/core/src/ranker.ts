@@ -1,3 +1,5 @@
+import type { VectorSummary } from './vector-scan.js';
+
 export interface RankItem {
   id: number;
   bm25?: number;
@@ -35,6 +37,49 @@ export function hybridRank(items: RankItem[], alpha: number): Array<{ id: number
       return { id: x.id, score: alpha * b + (1 - alpha) * c };
     })
     .sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Same scores and order as `hybridRank` over the merged keyword + vector set,
+ * without materializing it: the vector-only tail is represented by the summary's
+ * global cosine range and its top-k.
+ */
+export function rankFromSummary(
+  keyword: Array<{ id: number; score: number }>,
+  summary: VectorSummary,
+  alpha: number,
+): Array<{ id: number; score: number }> {
+  const cosineById = new Map(summary.keywordCosines);
+  const hasVectorOnly = summary.count - summary.keywordCosines.length > 0;
+
+  // hybridRank treats a missing bm25/cosine as 0 when taking min/max, so the
+  // basis must include 0 whenever such an item exists in the merged set.
+  let [bmin, bmax] = minMax(keyword.map((k) => k.score));
+  if (hasVectorOnly || keyword.length === 0) {
+    if (0 < bmin) bmin = 0;
+    if (0 > bmax) bmax = 0;
+  }
+  let cmin = summary.min;
+  let cmax = summary.max;
+  if (keyword.some((k) => !cosineById.has(k.id))) {
+    if (0 < cmin) cmin = 0;
+    if (0 > cmax) cmax = 0;
+  }
+  const bRange = bmax - bmin || 1;
+  const cRange = cmax - cmin || 1;
+
+  const scored = keyword.map((k) => {
+    const b = (k.score - bmin) / bRange;
+    const c = ((cosineById.get(k.id) ?? cmin) - cmin) / cRange;
+    return { id: k.id, score: alpha * b + (1 - alpha) * c };
+  });
+  for (const [id, cos] of summary.top) {
+    // A vector-only item has no bm25, which normalizes to 0.
+    const c = (cos - cmin) / cRange;
+    scored.push({ id, score: (1 - alpha) * c });
+  }
+  // Array#sort is stable: ties keep keyword-first, then top's order.
+  return scored.sort((a, b) => b.score - a.score);
 }
 
 export function cosine(a: Float32Array, b: Float32Array): number {
