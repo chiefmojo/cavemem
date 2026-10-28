@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SettingsSchema } from '@cavemem/config';
 import { type Embedder, MemoryStore } from '@cavemem/core';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startEmbedLoop, stateFilePath } from '../src/embed-loop.js';
 
 let dir: string;
@@ -175,5 +175,48 @@ describe('embed loop', () => {
     await handle.stop();
 
     expect(exited).toBe(false);
+  });
+
+  it('skips the backlog query while every observation is embedded', async () => {
+    store.startSession({ id: 'sess', ide: 'test', cwd: '/tmp' });
+    for (let i = 0; i < 3; i++) {
+      const id = store.addObservation({ session_id: 'sess', kind: 'note', content: `obs ${i}` });
+      store.storage.putEmbedding(id, 'mock-model', new Float32Array(4));
+    }
+    const spy = vi.spyOn(store.storage, 'observationsMissingEmbeddings');
+
+    const handle = startEmbedLoop({
+      store,
+      embedder: mockEmbedder('mock-model', 4),
+      settings: buildSettings(),
+      idleTickMs: 20,
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    await handle.stop();
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('runs the backlog query and embeds a row that is missing its embedding', async () => {
+    store.startSession({ id: 'sess', ide: 'test', cwd: '/tmp' });
+    const a = store.addObservation({ session_id: 'sess', kind: 'note', content: 'a' });
+    store.addObservation({ session_id: 'sess', kind: 'note', content: 'b' });
+    store.storage.putEmbedding(a, 'mock-model', new Float32Array(4));
+    const spy = vi.spyOn(store.storage, 'observationsMissingEmbeddings');
+
+    const handle = startEmbedLoop({
+      store,
+      embedder: mockEmbedder('mock-model', 4),
+      settings: buildSettings(),
+      idleTickMs: 20,
+    });
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && store.storage.countEmbeddings() < 2) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    await handle.stop();
+
+    expect(spy).toHaveBeenCalled();
+    expect(store.storage.countEmbeddings({ model: 'mock-model', dim: 4 })).toBe(2);
   });
 });
