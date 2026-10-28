@@ -60,7 +60,12 @@ export class SearchHealth {
 
   recordFailure(message: string): void {
     this.pushOutcome(true);
-    this.lastFailure = redactSecrets(redactPrivate(message)).slice(0, MAX_FAILURE_TEXT);
+    // Provider errors can echo the query or a JSON body, and the warning
+    // reaches every client's session start.
+    this.lastFailure = redactSecrets(redactPrivate(message), { quotedKeys: true }).slice(
+      0,
+      MAX_FAILURE_TEXT,
+    );
     this.checkCrossing();
   }
 
