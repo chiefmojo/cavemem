@@ -444,9 +444,12 @@ export class Storage {
     }));
   }
 
-  // The four paging queries below share one row predicate: model, dim, and a
-  // blob exactly dim floats long. A row failing it is invisible to all four, so
-  // embeddingCount and embeddingIds always agree about what the cache can hold.
+  // Paging reads for the worker's vector cache. The two that return blobs
+  // (embeddingsAfter, embeddingsByIds) also require a blob exactly dim floats
+  // long, so a caller never normalizes a short vector. embeddingIds and
+  // countEmbeddings skip that check: it reads every row of the table, while
+  // (model, dim) alone is answered from idx_embeddings_model. They therefore
+  // list malformed rows too, which the cache tracks as rejected ids.
   // Plain prepare/all (no iterate) so both backends behave the same.
 
   embeddingsAfter(
@@ -466,23 +469,14 @@ export class Storage {
     return rows.map(decodeEmbeddingRow);
   }
 
-  embeddingCount(model: string, dim: number): number {
-    const row = this.db
-      .prepare(
-        'SELECT COUNT(*) AS n FROM embeddings WHERE model = ? AND dim = ? AND length(vec) = ?',
-      )
-      .get(model, dim, dim * 4) as { n: number };
-    return row.n;
-  }
-
   embeddingIds(model: string, dim: number): number[] {
     const rows = this.db
       .prepare(
         `SELECT observation_id FROM embeddings
-         WHERE model = ? AND dim = ? AND length(vec) = ?
+         WHERE model = ? AND dim = ?
          ORDER BY observation_id`,
       )
-      .all(model, dim, dim * 4) as Array<{ observation_id: number }>;
+      .all(model, dim) as Array<{ observation_id: number }>;
     return rows.map((r) => r.observation_id);
   }
 

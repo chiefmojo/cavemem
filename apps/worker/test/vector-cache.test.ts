@@ -170,14 +170,108 @@ describe('VectorCache', () => {
     expect(log).toHaveBeenCalledTimes(1);
   });
 
-  it('buffer grows past initial capacity', () => {
+  it('a malformed row written after load converges', () => {
+    const ids = addObservations(10);
+    const bad = ids[4] as number;
+    embed(ids.filter((id) => id !== bad));
+    const log = vi.fn();
+    const cache = new VectorCache(storage, MODEL, DIM, log);
+    cache.load();
+    expect(cache.size).toBe(9);
+    expect(log).not.toHaveBeenCalled();
+
+    insertMalformed(bad);
+    const idsSpy = vi.spyOn(storage, 'embeddingIds');
+    for (let i = 0; i < 3; i++) cache.refresh();
+    expect(idsSpy).toHaveBeenCalledTimes(1);
+    expect(cache.size).toBe(9);
+    expect(cache.summarize(vecFor(1), [], 100).top.map(([id]) => id)).not.toContain(bad);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith({ event: 'vector-cache-skip', skipped: 1 });
+  });
+
+  it('one refresh pulls a row above the watermark and fills a gap below it', () => {
+    const ids = addObservations(10);
+    const gap = ids[3] as number;
+    const above = ids[9] as number;
+    embed(ids.slice(0, 8).filter((id) => id !== gap));
+    const cache = new VectorCache(storage, MODEL, DIM);
+    cache.load();
+    expect(cache.size).toBe(7);
+
+    embed([gap, above]);
+    cache.refresh();
+    expect(cache.size).toBe(9);
+    const found = cache.summarize(vecFor(1), [], 100).top.map(([id]) => id);
+    expect(found).toHaveLength(9);
+    expect(found.sort((a, b) => a - b)).toEqual([...ids.slice(0, 8), above]);
+  });
+
+  it('steady state refresh never lists ids', () => {
+    const ids = addObservations(5);
+    embed(ids);
+    const cache = new VectorCache(storage, MODEL, DIM);
+    cache.load();
+    const idsSpy = vi.spyOn(storage, 'embeddingIds');
+    cache.refresh();
+    cache.refresh();
+    expect(idsSpy).not.toHaveBeenCalled();
+    expect(cache.size).toBe(5);
+  });
+
+  it('a row written below the watermark during load is cached, not rejected', () => {
+    const ids = addObservations(10);
+    const late = ids[2] as number;
+    embed(ids.filter((id) => id !== late));
+    const original = storage.embeddingsAfter.bind(storage);
+    vi.spyOn(storage, 'embeddingsAfter').mockImplementationOnce((...args) => {
+      const page = original(...args);
+      embed([late]);
+      return page;
+    });
+    const log = vi.fn();
+    const cache = new VectorCache(storage, MODEL, DIM, log);
+    cache.load();
+    expect(cache.size).toBe(10);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('load sizes the buffer from the count instead of growing', () => {
     const ids = addObservations(100);
     embed(ids);
+    const grow = vi.spyOn(VectorCache.prototype as unknown as { grow(): void }, 'grow');
     const cache = new VectorCache(storage, MODEL, DIM, undefined, 4);
-    cache.load();
+    let grows: number;
+    try {
+      cache.load();
+    } finally {
+      // Read before restoring: mockRestore also clears the recorded calls.
+      grows = grow.mock.calls.length;
+      grow.mockRestore();
+    }
+    expect(grows).toBe(0);
     expect(cache.size).toBe(100);
     const found = cache.summarize(vecFor(1), [], 100);
     expect(found.count).toBe(100);
     expect(found.top.map(([id]) => id).sort((a, b) => a - b)).toEqual(ids);
+  });
+
+  it('buffer grows past initial capacity on refresh', () => {
+    const ids = addObservations(100);
+    embed(ids.slice(0, 2));
+    const cache = new VectorCache(storage, MODEL, DIM, undefined, 4);
+    cache.load();
+    embed(ids.slice(2));
+    cache.refresh();
+    expect(cache.size).toBe(100);
+    const found = cache.summarize(vecFor(1), [], 100);
+    expect(found.count).toBe(100);
+    expect(found.top.map(([id]) => id).sort((a, b) => a - b)).toEqual(ids);
+
+    // Vectors copied across each growth step must survive intact.
+    const fresh = new VectorCache(storage, MODEL, DIM);
+    fresh.load();
+    const q = new Float32Array([0.3, -1, 0.7, 2]);
+    expect(cache.summarize(q, [5, 60], 100)).toEqual(fresh.summarize(q, [5, 60], 100));
   });
 });

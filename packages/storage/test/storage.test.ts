@@ -533,15 +533,6 @@ describe('Storage embedding paging', () => {
     expect(storage.embeddingsAfter('A', 3, 0, 100)).toHaveLength(0);
   });
 
-  it('embeddingCount counts only the given model/dim', () => {
-    const ids = seed(5);
-    for (const id of ids.slice(0, 3)) storage.putEmbedding(id, 'A', vecFor(id));
-    for (const id of ids.slice(3)) storage.putEmbedding(id, 'B', vecFor(id));
-    expect(storage.embeddingCount('A', 4)).toBe(3);
-    expect(storage.embeddingCount('B', 4)).toBe(2);
-    expect(storage.embeddingCount('A', 8)).toBe(0);
-  });
-
   it('embeddingIds returns ascending ids for model/dim only', () => {
     const ids = seed(6);
     for (const id of [ids[4], ids[0], ids[2]] as number[])
@@ -579,19 +570,21 @@ describe('Storage embedding paging', () => {
     expect(Array.from(byId[0]?.vec ?? [])).toEqual(Array.from(vecFor(1)));
   });
 
-  it('malformed blobs are excluded from all four queries consistently', () => {
+  it('malformed blobs: the index-only reads list them, the blob reads skip them', () => {
     const ids = seed(3);
     storage.putEmbedding(ids[0] as number, 'A', vecFor(1));
     storage.putEmbedding(ids[1] as number, 'A', vecFor(2));
     insertMalformed(ids[2] as number);
     const bad = ids[2] as number;
-    expect(storage.embeddingsAfter('A', 4, 0, 100).map((r) => r.observation_id)).not.toContain(bad);
-    expect(storage.embeddingIds('A', 4)).toEqual([ids[0], ids[1]]);
+    expect(storage.embeddingIds('A', 4)).toEqual([ids[0], ids[1], bad]);
+    expect(storage.countEmbeddings({ model: 'A', dim: 4 })).toBe(3);
+    expect(storage.embeddingsAfter('A', 4, 0, 100).map((r) => r.observation_id)).toEqual([
+      ids[0],
+      ids[1],
+    ]);
     expect(storage.embeddingsByIds('A', 4, ids).map((r) => r.observation_id)).toEqual([
       ids[0],
       ids[1],
     ]);
-    expect(storage.embeddingCount('A', 4)).toBe(2);
-    expect(storage.countEmbeddings({ model: 'A', dim: 4 })).toBe(3);
   });
 });
