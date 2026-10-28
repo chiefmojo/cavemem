@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { expand } from '@cavemem/compress';
 import { type Settings, loadSettings, resolveDataDir } from '@cavemem/config';
-import { type Embedder, MemoryStore } from '@cavemem/core';
+import { type Embedder, MemoryStore, type VectorIndex } from '@cavemem/core';
 import { createEmbedder } from '@cavemem/embedding';
 import { type HookInput, type HookName, buildPriorContext, runHook } from '@cavemem/hooks';
 import { buildServer } from '@cavemem/mcp-server';
@@ -13,6 +13,8 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { type EmbedLoopHandle, startEmbedLoop, stateFilePath } from './embed-loop.js';
+import { ScanClient } from './scan-client.js';
+import { SearchHealth } from './search-health.js';
 import {
   allowedHostSet,
   bearerAuth,
@@ -33,6 +35,9 @@ export interface BuildAppOptions {
   allowedHosts?: string[];
   /** Pre-loaded embedder shared with /mcp; null when provider=none or load failed. */
   embedder?: Embedder | null;
+  /** Runs /mcp hybrid search's vector scan off the event loop. */
+  vectorIndex?: VectorIndex;
+  health?: SearchHealth;
   loop?: EmbedLoopHandle | undefined;
 }
 
@@ -81,7 +86,15 @@ export function buildApp(store: MemoryStore, opts: BuildAppOptions): Hono {
   // Origin header; the shared originCheck still applies so a browser page
   // cannot reach this route (DNS rebinding).
   app.all('/mcp', async (c) => {
-    const mcp = buildServer(store, store.settings, { embedder: opts.embedder ?? null });
+    const mcp = buildServer(store, store.settings, {
+      embedder: opts.embedder ?? null,
+      ...(opts.vectorIndex ? { vectorIndex: opts.vectorIndex } : {}),
+      onSearch: (o) => {
+        if (!opts.health) return;
+        if (o.ok) opts.health.recordSuccess(o);
+        else opts.health.recordFailure(o.error);
+      },
+    });
     // Omitting the optional generator selects stateless mode. SDK 1.29's
     // declaration rejects an explicit `undefined` with exactOptionalPropertyTypes.
     const transport = new WebStandardStreamableHTTPServerTransport({});
@@ -202,12 +215,15 @@ export async function start(): Promise<void> {
   writePidFile(settings);
 
   let loop: EmbedLoopHandle | undefined;
+  let scan: ScanClient | undefined;
   const servers: Array<ReturnType<typeof serve>> = [];
 
   const shutdown = async () => {
     removePidFile(settings);
     if (loop) await loop.stop();
     for (const s of servers) s.close();
+    // Before store.close(): the scan thread holds its own handle on the same db.
+    if (scan) await scan.close();
     store.close();
   };
 
@@ -264,12 +280,23 @@ export async function start(): Promise<void> {
     );
   }
 
+  // Started after startEmbedLoop so dropEmbeddingsWhereModelNot has already
+  // run when the thread loads its corpus.
+  let health: SearchHealth | undefined;
+  if (embedder) {
+    scan = new ScanClient({ dbPath, model: embedder.model, dim: embedder.dim });
+    scan.start();
+    health = new SearchHealth();
+  }
+
   const token = getOrCreateToken(settings);
   const app = buildApp(store, {
     port: settings.workerPort,
     token,
     allowedHosts: settings.workerAllowedHosts,
     embedder,
+    ...(scan ? { vectorIndex: scan } : {}),
+    ...(health ? { health } : {}),
     loop,
   });
   servers.push(

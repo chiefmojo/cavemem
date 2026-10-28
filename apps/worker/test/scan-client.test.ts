@@ -5,11 +5,10 @@ import { Storage } from '@cavemem/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ScanClient, type ScanClientOptions } from '../src/scan-client.js';
 import { VectorCache } from '../src/vector-cache.js';
+import { scanThreadFromSource } from './support/scan-thread.js';
 
 const MODEL = 'm';
 const DIM = 4;
-const ENTRY = new URL('../src/scan-thread.ts', import.meta.url);
-const LOADER = new URL('./support/ts-thread-loader.mjs', import.meta.url).href;
 
 let dir: string;
 let dbPath: string;
@@ -65,13 +64,7 @@ function makeClient(extra: Partial<ScanClientOptions> = {}): ScanClient {
     dbPath,
     model: MODEL,
     dim: DIM,
-    entry: ENTRY,
-    execArgv: [
-      '--experimental-transform-types',
-      '--disable-warning=ExperimentalWarning',
-      '--import',
-      LOADER,
-    ],
+    ...scanThreadFromSource,
     log: () => {},
     ...extra,
   });
