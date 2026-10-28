@@ -190,6 +190,37 @@ describe('ScanClient', () => {
     expect(client.thread).toBeUndefined();
   });
 
+  it('a load that never posts ready times out, rejects pending and respawns', async () => {
+    addEmbedded(5);
+    const log = vi.fn();
+    const hung = makeClient({ loadTimeoutMs: 1_000, testLoadDelayMs: 5_000, log });
+    const first = hung.summarize(Q, [], 3);
+    const second = hung.summarize(Q, [], 3);
+    const settled = await Promise.allSettled([first, second]);
+    for (const s of settled) {
+      expect(s.status).toBe('rejected');
+      expect((s as PromiseRejectedResult).reason.message).toBe(
+        'scan thread load timed out after 1000 ms',
+      );
+    }
+    expect(hung.thread).toBeUndefined();
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith({ event: 'scan-thread-load-timeout', ms: 1_000 });
+
+    const fresh = makeClient();
+    expect((await fresh.summarize(Q, [], 3)).count).toBe(5);
+  });
+
+  it('a normal load clears the load timer', async () => {
+    addEmbedded(5);
+    const log = vi.fn();
+    const client = makeClient({ loadTimeoutMs: 1_500, log });
+    await client.summarize(Q, [], 3);
+    await new Promise((r) => setTimeout(r, 1_800));
+    expect(client.thread).toBeDefined();
+    expect(log).not.toHaveBeenCalled();
+  });
+
   it('close rejects pending and leaves no live thread', async () => {
     addEmbedded(5);
     const baseline = process.getActiveResourcesInfo().length;

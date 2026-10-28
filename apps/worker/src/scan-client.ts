@@ -7,12 +7,16 @@ export interface ScanClientOptions {
   model: string;
   dim: number;
   timeoutMs?: number;
+  /** Bounds the initial corpus load; a hung load must fail, not hang searches. */
+  loadTimeoutMs?: number;
   entry?: URL;
   /** Tests only. */
   execArgv?: string[];
   log?: (line: Record<string, unknown>) => void;
   /** Tests only: forwarded in workerData; the thread sleeps this long per request. */
   testDelayMs?: number;
+  /** Tests only: forwarded in workerData; the thread blocks this long before loading. */
+  testLoadDelayMs?: number;
 }
 
 interface Pending {
@@ -46,6 +50,8 @@ const stderrLog = (line: Record<string, unknown>): void => {
  */
 export class ScanClient implements VectorIndex {
   private readonly timeoutMs: number;
+  private readonly loadTimeoutMs: number;
+  private loadTimer: NodeJS.Timeout | undefined;
   private readonly entry: URL;
   private readonly log: (line: Record<string, unknown>) => void;
   private worker: Worker | undefined;
@@ -57,6 +63,7 @@ export class ScanClient implements VectorIndex {
 
   constructor(private readonly opts: ScanClientOptions) {
     this.timeoutMs = opts.timeoutMs ?? 10_000;
+    this.loadTimeoutMs = opts.loadTimeoutMs ?? 60_000;
     this.entry = opts.entry ?? new URL('./scan-thread.js', import.meta.url);
     this.log = opts.log ?? stderrLog;
   }
@@ -73,6 +80,9 @@ export class ScanClient implements VectorIndex {
       model: this.opts.model,
       dim: this.opts.dim,
       ...(this.opts.testDelayMs !== undefined ? { testDelayMs: this.opts.testDelayMs } : {}),
+      ...(this.opts.testLoadDelayMs !== undefined
+        ? { testLoadDelayMs: this.opts.testLoadDelayMs }
+        : {}),
     };
     const worker = new Worker(this.entry, {
       workerData: data,
@@ -80,6 +90,12 @@ export class ScanClient implements VectorIndex {
     });
     this.worker = worker;
     this.ready = false;
+    this.loadTimer = setTimeout(() => {
+      this.fail(new Error(`scan thread load timed out after ${this.loadTimeoutMs} ms`), {
+        event: 'scan-thread-load-timeout',
+        ms: this.loadTimeoutMs,
+      });
+    }, this.loadTimeoutMs);
     worker.on('message', (msg: ScanResponse) => {
       if (this.worker === worker) this.onMessage(msg);
     });
@@ -127,6 +143,7 @@ export class ScanClient implements VectorIndex {
 
   private onMessage(msg: ScanResponse): void {
     if (msg.type === 'ready') {
+      clearTimeout(this.loadTimer);
       this.ready = true;
       // Waiting for the corpus to load is warmup, not queueing behind a search.
       const now = performance.now();
@@ -186,6 +203,7 @@ export class ScanClient implements VectorIndex {
     const worker = this.worker;
     this.worker = undefined;
     this.ready = false;
+    clearTimeout(this.loadTimer);
     const pending: Pending[] = [];
     if (this.inflight) {
       clearTimeout(this.inflight.timer);

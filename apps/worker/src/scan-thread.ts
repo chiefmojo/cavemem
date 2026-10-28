@@ -9,6 +9,8 @@ export interface ScanThreadData {
   dim: number;
   /** Tests only: sleep this long before answering each request. */
   testDelayMs?: number;
+  /** Tests only: block this long before loading, to simulate a hung load. */
+  testLoadDelayMs?: number;
 }
 
 export type ScanRequest = {
@@ -27,7 +29,7 @@ export type ScanResponse =
 const port = parentPort;
 if (!port) throw new Error('scan-thread must run inside a worker thread');
 
-const { dbPath, model, dim, testDelayMs } = workerData as ScanThreadData;
+const { dbPath, model, dim, testDelayMs, testLoadDelayMs } = workerData as ScanThreadData;
 const post = (msg: ScanResponse) => port.postMessage(msg);
 const describe = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -35,6 +37,8 @@ const describe = (err: unknown) => (err instanceof Error ? err.message : String(
 // it read while the main thread keeps writing.
 let cache: VectorCache | undefined;
 try {
+  if (testLoadDelayMs)
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, testLoadDelayMs);
   const storage = new Storage(dbPath, { readonly: true });
   cache = new VectorCache(storage, model, dim);
   cache.load();
