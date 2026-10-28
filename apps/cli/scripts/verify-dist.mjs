@@ -34,6 +34,11 @@ export async function verifyDist(cliRoot) {
     }
   }
 
+  // ScanClient resolves the thread entry as ./scan-thread.js next to its own chunk.
+  if (!existsSync(join(cliRoot, 'dist', 'scan-thread.js'))) {
+    failures.push('dist/scan-thread.js missing; run `pnpm build` before publishing');
+  }
+
   // Same predicate as e2e-publish.sh step 6b.
   const bridge = join(cliRoot, 'dist', 'opencodeBridge.js');
   if (!existsSync(bridge)) {

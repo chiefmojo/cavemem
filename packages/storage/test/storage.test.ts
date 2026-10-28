@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Storage } from '../src/index.js';
 
@@ -469,6 +470,112 @@ describe('Storage', () => {
       { ide: 'ide-a', sessions: 2, summaries: 1 },
       { ide: 'ide-b', sessions: 1, summaries: 0 },
       { ide: 'unknown', sessions: 1, summaries: 1 },
+    ]);
+  });
+});
+
+describe('Storage embedding paging', () => {
+  function seed(n: number): number[] {
+    storage.createSession({
+      id: 'page',
+      ide: 'claude-code',
+      cwd: null,
+      started_at: Date.now(),
+      metadata: null,
+    });
+    const ids: number[] = [];
+    for (let i = 0; i < n; i++) {
+      ids.push(
+        storage.insertObservation({
+          session_id: 'page',
+          kind: 'note',
+          content: `obs ${i}`,
+          compressed: true,
+          intensity: 'full',
+        }),
+      );
+    }
+    return ids;
+  }
+
+  const vecFor = (id: number): Float32Array => new Float32Array([id, id + 1, id + 2, id + 3]);
+
+  // putEmbedding always writes dim = vec.length, so a blob whose length
+  // disagrees with dim can only come from a raw insert.
+  function insertMalformed(observationId: number): void {
+    const raw = new Database(join(dir, 'test.db'));
+    try {
+      raw
+        .prepare('INSERT INTO embeddings(observation_id, model, dim, vec) VALUES (?, ?, ?, ?)')
+        .run(observationId, 'A', 4, new Uint8Array(12));
+    } finally {
+      raw.close();
+    }
+  }
+
+  it('embeddingsAfter pages in ascending id and respects model/dim', () => {
+    const ids = seed(28);
+    for (const id of ids.slice(0, 25)) storage.putEmbedding(id, 'A', vecFor(id));
+    for (const id of ids.slice(25)) storage.putEmbedding(id, 'B', vecFor(id));
+    const rows = storage.embeddingsAfter('A', 4, 10, 5);
+    expect(rows.map((r) => r.observation_id)).toEqual([11, 12, 13, 14, 15]);
+    expect(Array.from(rows[0]?.vec ?? [])).toEqual(Array.from(vecFor(11)));
+    expect(storage.embeddingsAfter('A', 4, 0, 100)).toHaveLength(25);
+    expect(storage.embeddingsAfter('A', 3, 0, 100)).toHaveLength(0);
+  });
+
+  it('embeddingIds returns ascending ids for model/dim only', () => {
+    const ids = seed(6);
+    for (const id of [ids[4], ids[0], ids[2]] as number[])
+      storage.putEmbedding(id, 'A', vecFor(id));
+    storage.putEmbedding(ids[1] as number, 'B', vecFor(2));
+    expect(storage.embeddingIds('A', 4)).toEqual([ids[0], ids[2], ids[4]]);
+  });
+
+  it('embeddingsByIds returns only requested ids that exist', () => {
+    const ids = seed(3);
+    for (const id of ids) storage.putEmbedding(id, 'A', vecFor(id));
+    const rows = storage.embeddingsByIds('A', 4, [2, 999]);
+    expect(rows.map((r) => r.observation_id)).toEqual([2]);
+    expect(storage.embeddingsByIds('A', 4, [])).toEqual([]);
+  });
+
+  it('embeddingsByIds chunks id lists longer than one statement', () => {
+    const ids = seed(1200);
+    storage.transaction(() => {
+      for (const id of ids) storage.putEmbedding(id, 'A', vecFor(id));
+    });
+    const rows = storage.embeddingsByIds('A', 4, ids);
+    expect(rows).toHaveLength(1200);
+    expect(rows.map((r) => r.observation_id)).toEqual(ids);
+  });
+
+  it('vec is a copy, not a view', () => {
+    const ids = seed(1);
+    storage.putEmbedding(ids[0] as number, 'A', vecFor(1));
+    const first = storage.embeddingsAfter('A', 4, 0, 10);
+    (first[0]?.vec as Float32Array).fill(-1);
+    const second = storage.embeddingsAfter('A', 4, 0, 10);
+    expect(Array.from(second[0]?.vec ?? [])).toEqual(Array.from(vecFor(1)));
+    const byId = storage.embeddingsByIds('A', 4, [ids[0] as number]);
+    expect(Array.from(byId[0]?.vec ?? [])).toEqual(Array.from(vecFor(1)));
+  });
+
+  it('malformed blobs: the index-only reads list them, the blob reads skip them', () => {
+    const ids = seed(3);
+    storage.putEmbedding(ids[0] as number, 'A', vecFor(1));
+    storage.putEmbedding(ids[1] as number, 'A', vecFor(2));
+    insertMalformed(ids[2] as number);
+    const bad = ids[2] as number;
+    expect(storage.embeddingIds('A', 4)).toEqual([ids[0], ids[1], bad]);
+    expect(storage.countEmbeddings({ model: 'A', dim: 4 })).toBe(3);
+    expect(storage.embeddingsAfter('A', 4, 0, 100).map((r) => r.observation_id)).toEqual([
+      ids[0],
+      ids[1],
+    ]);
+    expect(storage.embeddingsByIds('A', 4, ids).map((r) => r.observation_id)).toEqual([
+      ids[0],
+      ids[1],
     ]);
   });
 });

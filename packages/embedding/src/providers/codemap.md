@@ -20,7 +20,7 @@ The concrete `Embedder` constructors: one module per `settings.embedding.provide
 
 ## Flow
 
-`createEmbedder` → constructor for the chosen provider → (local: musl check → lazy import → pipeline build) or (remote: base URL resolution → API key check) → `dim` fixed via `MODEL_DIMS` lookup or one probe `embed(' ')` → `Embedder` returned to the factory's caller. During normal operation, each `embed(text)` call is either an in-process ONNX inference (local) or one HTTP round-trip (ollama/openai); the result flows through `@cavemem/storage` into the vector index, where `MemoryStore.search` later filters `allEmbeddings({ model, dim })` by this embedder's identity.
+`createEmbedder` → constructor for the chosen provider → (local: musl check → lazy import → pipeline build) or (remote: base URL resolution → API key check) → `dim` fixed via `MODEL_DIMS` lookup or one probe `embed(' ')` → `Embedder` returned to the factory's caller. During normal operation, each `embed(text)` call is either an in-process ONNX inference (local) or one HTTP round-trip (ollama/openai); the result flows through `@cavemem/storage` into the vector index, and search later reads only the vectors matching this embedder's `{ model, dim }`: the worker's scan thread caches them through the `(model, dim)` paging reads, and the in-process path (stdio MCP, CLI) loads `allEmbeddings({ model, dim })`.
 
 ## Integration
 

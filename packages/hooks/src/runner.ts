@@ -18,6 +18,12 @@ export interface RunHookOptions {
    * will not construct or close the store — the caller owns its lifecycle.
    */
   store?: MemoryStore;
+  /**
+   * Notice to surface at session start, supplied by the worker (which owns
+   * search health). The runner attaches it for every session-start source,
+   * since the handler returns early for non-startup ones.
+   */
+  sessionWarning?: () => string | undefined;
 }
 
 export async function runHook(
@@ -81,6 +87,10 @@ export async function runHook(
     }
     const result: HookResult = { ok: true, ms: Math.round(performance.now() - start) };
     if (context !== undefined) result.context = context;
+    if (name === 'session-start') {
+      const warning = opts.sessionWarning?.();
+      if (warning) result.warning = warning;
+    }
     return result;
   } catch (err) {
     return {

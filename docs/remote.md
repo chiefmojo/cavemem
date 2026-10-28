@@ -41,6 +41,21 @@ The central server should set `workerHost` to `"0.0.0.0"`, provide a non-empty `
 
 SQLite contention does not arise: one process owns the store and is the only writer.
 
+## Search health warning
+
+The server watches its own hybrid search (the vector scan behind the MCP `search` tool) and says so when it is not holding up. A warning appears in either of two cases:
+
+- Latency: `cavemem: hybrid search p95 <n> ms is over the 300 ms budget at <count> vectors. The exact vector scan has reached its ceiling.` The p95 is taken over the last 50 hybrid searches, not counting ones that waited on the initial load, needs at least 20 before it counts, and measures the scan itself, not time spent queued behind another search.
+- Failures: `cavemem: hybrid search failing (<n> of last 20): <last error>`. It appears once 3 of the last 20 hybrid searches have failed.
+
+If both hold, both lines are shown.
+
+Claude Code shows the warning at the start of every session, on every source (`startup`, `clear`, `resume`, `compact`), through the hook's `systemMessage` field. It goes to you and stays out of the model's context. Other IDEs may not render `systemMessage`, in which case they show nothing.
+
+The warning travels in the server's hook response and the client's `cavemem hook run` turns it into the `systemMessage`, so both the server and the client must run the release that introduced this feature or a later one; an older client silently drops it. Local mode never shows the warning: there is no central worker tracking search health.
+
+It clears when successful searches push the failures out of the window or bring the p95 back under budget, or when the worker restarts.
+
 ## Privacy
 
 Privacy is enforced at the write boundary. Content inside `<private>…</private>` tags is stripped. Paths matching `settings.excludePatterns` are never read. Neither appears in logs. The write boundary is the server's `MemoryStore`: in remote mode, raw hook payloads cross the LAN to the central worker before `excludePatterns` and `<private>` stripping apply (spec decision 4, 2026-09-02).

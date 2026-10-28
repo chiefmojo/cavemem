@@ -97,6 +97,22 @@ describe('redactPrivate', () => {
 });
 
 describe('redactSecrets', () => {
+  it('quotedKeys redacts credential values with quoted field names in provider JSON', () => {
+    const quoted = { quotedKeys: true };
+    expect(
+      redactSecrets('{"api_key":"fixture-key-1234567890","error":"invalid key"}', quoted),
+    ).toBe('{"api_key":"[REDACTED]","error":"invalid key"}');
+    expect(redactSecrets("{'password': 'hunter22222'}", quoted)).toBe("{'password': '[REDACTED]'}");
+    expect(redactSecrets('{"cacheKey":"cache-value-123","token":"identifier"}', quoted)).toBe(
+      '{"cacheKey":"cache-value-123","token":"identifier"}',
+    );
+  });
+
+  it('leaves quoted JSON keys alone by default, so stored payloads keep ordinary key fields', () => {
+    const json = '{"sort_key":"created_at","primary_key": "observation_id"}';
+    expect(redactSecrets(json)).toBe(json);
+  });
+
   it('redacts a Bearer token, keeping the "Bearer" prefix', () => {
     const out = redactSecrets(
       'curl -H "Authorization: Bearer abcdef123456.xyz789" https://api.example.com',

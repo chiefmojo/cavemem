@@ -27,8 +27,16 @@ const SLACK_TOKEN_RE = /\bxox[baprs]-[A-Za-z0-9-]{10,72}\b/g;
 // alone misses them. Bare `key` requires a preceding `_`/`-` so camelCase
 // identifiers like `cacheKey` never match. The value alternates quoted (") /
 // quoted (') / bare so the closing quote is never swallowed by \S{8,}.
-const ASSIGNMENT_RE =
-  /\b([\w-]*(?:api[_-]?key|secret|token|password|passwd|authorization|[_-]key))(\s*[=:]\s*)(?:"([^"\s]{8,})"|'([^'\s]{8,})'|(\S{8,}))/gi;
+const SECRET_KEY = String.raw`\b([\w-]*(?:api[_-]?key|secret|token|password|passwd|authorization|[_-]key))`;
+const SECRET_VALUE = String.raw`(?:"([^"\s]{8,})"|'([^'\s]{8,})'|(\S{8,}))`;
+const ASSIGNMENT_RE = new RegExp(String.raw`${SECRET_KEY}(\s*[=:]\s*)${SECRET_VALUE}`, 'gi');
+// Also allows a closing quote on the key, as in a JSON provider error body
+// ({"api_key":"…"}). Stored observations keep ASSIGNMENT_RE: on JSON tool
+// payloads this form also masks ordinary fields like "sort_key":"created_at".
+const QUOTED_ASSIGNMENT_RE = new RegExp(
+  String.raw`${SECRET_KEY}(["']?\s*[=:]\s*)${SECRET_VALUE}`,
+  'gi',
+);
 
 /**
  * True if `value` is secret-shaped enough to redact: long enough, and not
@@ -46,9 +54,10 @@ function looksSecretish(value: string): boolean {
  * Scrub secret-shaped substrings — bearer tokens, provider API keys, AWS/GitHub
  * credentials, generic key=value assignments, and PEM private key blocks —
  * before compression. Gated by settings.privacy.redactSecrets, independent of
- * (and applied alongside) redactPrivate.
+ * (and applied alongside) redactPrivate. `quotedKeys` also matches JSON-style
+ * `"key": "value"` assignments; it is for diagnostics, not stored content.
  */
-export function redactSecrets(text: string): string {
+export function redactSecrets(text: string, options: { quotedKeys?: boolean } = {}): string {
   let out = text.replace(PEM_RE, '[REDACTED]');
   out = out.replace(BEARER_RE, 'Bearer [REDACTED]');
   out = out.replace(OPENAI_KEY_RE, '[REDACTED]');
@@ -56,7 +65,8 @@ export function redactSecrets(text: string): string {
   out = out.replace(GITHUB_TOKEN_RE, '[REDACTED]');
   out = out.replace(GITHUB_FINE_PAT_RE, '[REDACTED]');
   out = out.replace(SLACK_TOKEN_RE, '[REDACTED]');
-  out = out.replace(ASSIGNMENT_RE, (match, key, sep, dq, sq, bare) => {
+  const assignment = options.quotedKeys ? QUOTED_ASSIGNMENT_RE : ASSIGNMENT_RE;
+  out = out.replace(assignment, (match, key, sep, dq, sq, bare) => {
     const value: string = dq ?? sq ?? bare;
     if (!looksSecretish(value)) return match;
     const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : '';

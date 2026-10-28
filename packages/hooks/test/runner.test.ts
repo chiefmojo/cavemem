@@ -463,6 +463,20 @@ describe('runHook — remote mode', () => {
     expect(existsSync(join(home, 'data.db'))).toBe(false);
   });
 
+  it('session-start passes the server warning through', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ ok: true, warning: 'cavemem: test warning' }), {
+            status: 200,
+          }),
+      ),
+    );
+    const r = await remoteRunHook('session-start', { session_id: 'r-warn', ide: 'claude-code' });
+    expect(r.warning).toBe('cavemem: test warning');
+  });
+
   it('spools on network failure and still returns ok', async () => {
     vi.stubGlobal(
       'fetch',
@@ -521,5 +535,33 @@ describe('runHook — remote mode', () => {
         ? readFileSync(join(home, 'spool.jsonl'), 'utf8').trim()
         : '',
     ).toBe('');
+  });
+});
+
+describe('runHook sessionWarning', () => {
+  it('session-start attaches the injected warning on every source', async () => {
+    for (const source of ['startup', 'clear', 'resume', 'compact']) {
+      const r = await runHook(
+        'session-start',
+        { session_id: `warn-${source}`, ide: 'claude-code', source },
+        { store, sessionWarning: () => 'W' },
+      );
+      expect(r.warning, source).toBe('W');
+    }
+  });
+
+  it('no warning field when sessionWarning returns undefined or for other hooks', async () => {
+    const quiet = await runHook(
+      'session-start',
+      { session_id: 'warn-none', ide: 'claude-code' },
+      { store, sessionWarning: () => undefined },
+    );
+    expect('warning' in quiet).toBe(false);
+    const other = await runHook(
+      'user-prompt-submit',
+      { session_id: 'warn-none', ide: 'claude-code', prompt: 'hi' },
+      { store, sessionWarning: () => 'W' },
+    );
+    expect('warning' in other).toBe(false);
   });
 });

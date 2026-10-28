@@ -4,7 +4,12 @@ import { defineConfig } from 'tsup';
 const { version } = JSON.parse(readFileSync('./package.json', 'utf8')) as { version: string };
 
 export default defineConfig({
-  entry: { index: 'src/index.ts', opencodeBridge: 'src/opencode-bridge.ts' },
+  entry: {
+    index: 'src/index.ts',
+    opencodeBridge: 'src/opencode-bridge.ts',
+    // Loaded at runtime by ScanClient via worker_threads, so it must be its own file.
+    'scan-thread': '../worker/src/scan-thread.ts',
+  },
   format: ['esm'],
   target: 'node20',
   platform: 'node',

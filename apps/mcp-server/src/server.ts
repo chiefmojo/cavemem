@@ -4,7 +4,13 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { redactPrivate, redactSecrets } from '@cavemem/compress';
 import { type Settings, loadSettings, resolveDataDir } from '@cavemem/config';
-import { type Embedder, MemoryStore, createSessionId } from '@cavemem/core';
+import {
+  type Embedder,
+  MemoryStore,
+  type VectorIndex,
+  type VectorSummary,
+  createSessionId,
+} from '@cavemem/core';
 import { createEmbedder } from '@cavemem/embedding';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -19,6 +25,14 @@ export interface ServerDeps {
    * own so the /mcp route never loads a second model. Undefined = lazy-load.
    */
   embedder?: Embedder | null;
+  /** Serves hybrid search's vector scan off this thread; undefined scans in-process. */
+  vectorIndex?: VectorIndex;
+  /** Called once per hybrid search; never for searches that stayed keyword-only. */
+  onSearch?: (
+    o:
+      | { ok: true; ms: number; queuedMs: number; warmup: boolean; count: number }
+      | { ok: false; error: string },
+  ) => void;
 }
 
 /**
@@ -62,7 +76,33 @@ export function buildServer(
     { query: z.string().min(1), limit: z.number().int().positive().max(50).optional() },
     async ({ query, limit }) => {
       const e = (await resolveEmbedder()) ?? undefined;
-      const hits = await store.search(query, limit, e);
+      let summary: VectorSummary | undefined;
+      const started = performance.now();
+      let hits: Awaited<ReturnType<MemoryStore['search']>>;
+      try {
+        hits = await store.search(query, limit, e, {
+          ...(deps.vectorIndex ? { index: deps.vectorIndex } : {}),
+          onSummary: (s) => {
+            summary = s;
+          },
+        });
+      } catch (err) {
+        // Only a hybrid search can fail in the index; the SDK turns the rethrow
+        // into an isError tool result, so the caller never sees silent keyword hits.
+        if (deps.vectorIndex && e) {
+          deps.onSearch?.({ ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+        throw err;
+      }
+      if (summary) {
+        deps.onSearch?.({
+          ok: true,
+          ms: performance.now() - started,
+          queuedMs: summary.queuedMs,
+          warmup: summary.warmup,
+          count: summary.count,
+        });
+      }
       return {
         content: [{ type: 'text', text: JSON.stringify(hits) }],
       };

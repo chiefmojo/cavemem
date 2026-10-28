@@ -1,14 +1,19 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultSettings } from '@cavemem/config';
-import { MemoryStore } from '@cavemem/core';
+import { type Embedder, MemoryStore, type VectorIndex } from '@cavemem/core';
+import { createEmbedder } from '@cavemem/embedding';
 import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ScanClient } from '../src/scan-client.js';
+import { SearchHealth } from '../src/search-health.js';
 import { buildApp } from '../src/server.js';
+import { scanThreadFromSource } from './support/scan-thread.js';
 
 const TOKEN = 'mcp-test-token';
 
@@ -43,24 +48,27 @@ async function connect(headers: Record<string, string>): Promise<Client> {
   return client;
 }
 
-beforeEach(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'cavemem-mcp-http-'));
-  store = new MemoryStore({
-    dbPath: join(dir, 'data.db'),
-    settings: { ...defaultSettings, embedding: { ...defaultSettings.embedding, provider: 'none' } },
-  });
-  port = await freePort();
-  const app = buildApp(store, { port, token: TOKEN, embedder: null });
-  server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' });
-});
-
-afterEach(async () => {
-  await new Promise<void>((r) => server.close(() => r()));
-  store.close();
-  rmSync(dir, { recursive: true, force: true });
-});
-
 describe('MCP over streamable HTTP', () => {
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cavemem-mcp-http-'));
+    store = new MemoryStore({
+      dbPath: join(dir, 'data.db'),
+      settings: {
+        ...defaultSettings,
+        embedding: { ...defaultSettings.embedding, provider: 'none' },
+      },
+    });
+    port = await freePort();
+    const app = buildApp(store, { port, token: TOKEN, embedder: null });
+    server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('lists tools and searches through the worker', async () => {
     store.startSession({ id: 's1', ide: 'test', cwd: '/tmp' });
     const id = store.addObservation({
@@ -107,5 +115,190 @@ describe('MCP over streamable HTTP', () => {
     await expect(
       connect({ authorization: `Bearer ${TOKEN}`, origin: 'http://evil.example' }),
     ).rejects.toMatchObject({ code: 403 });
+  });
+});
+
+const DIM = 16;
+const MODEL = 'test-embedder';
+
+/** Deterministic pseudo-embedding: the same text always maps to the same vector. */
+function embedText(text: string): Float32Array {
+  const v = new Float32Array(DIM);
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+    v[i % DIM] = (v[i % DIM] as number) + ((h >>> 8) % 1000) / 500 - 1;
+  }
+  return v;
+}
+
+const embedder: Embedder = {
+  model: MODEL,
+  dim: DIM,
+  embed: async (text) => embedText(text),
+};
+
+type SearchHit = { id: number; score: number };
+
+async function searchOverMcp(client: Client, query: string, limit = 10) {
+  return client.callTool({ name: 'search', arguments: { query, limit } });
+}
+
+describe('hybrid search over /mcp', () => {
+  let scan: ScanClient | undefined;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'cavemem-mcp-hybrid-'));
+    store = new MemoryStore({ dbPath: join(dir, 'data.db'), settings: defaultSettings });
+    store.startSession({ id: 's1', ide: 'test', cwd: '/tmp' });
+    store.storage.transaction(() => {
+      for (let i = 0; i < 200; i++) {
+        const content = `note ${i}: ${i % 3 === 0 ? 'cargo build' : 'pnpm test'} topic${i % 17}`;
+        const id = store.addObservation({ session_id: 's1', kind: 'note', content });
+        store.storage.putEmbedding(id, MODEL, embedText(content));
+      }
+    });
+  });
+
+  afterEach(async () => {
+    await scan?.close();
+    scan = undefined;
+    await new Promise<void>((r) => server.close(() => r()));
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function mount(
+    index: VectorIndex,
+    health: SearchHealth,
+    queryEmbedder = embedder,
+  ): Promise<Client> {
+    port = await freePort();
+    const app = buildApp(store, {
+      port,
+      token: TOKEN,
+      embedder: queryEmbedder,
+      vectorIndex: index,
+      health,
+    });
+    server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' });
+    return connect({ authorization: `Bearer ${TOKEN}` });
+  }
+
+  it('hybrid search over /mcp returns the oracle ranking', async () => {
+    scan = new ScanClient({
+      dbPath: join(dir, 'data.db'),
+      model: MODEL,
+      dim: DIM,
+      log: () => {},
+      ...scanThreadFromSource,
+    });
+    const health = new SearchHealth({ log: () => {} });
+    const recorded = vi.spyOn(health, 'recordSuccess');
+    const client = await mount(scan, health);
+
+    const res = await searchOverMcp(client, 'cargo topic3');
+    const text = (res.content as Array<{ text: string }>)[0]?.text ?? '[]';
+    const got = JSON.parse(text) as SearchHit[];
+    const oracle = await store.search('cargo topic3', 10, embedder);
+
+    expect(res.isError).toBeFalsy();
+    expect(oracle.length).toBeGreaterThan(0);
+    expect(got.map((h) => h.id)).toEqual(oracle.map((h) => h.id));
+    got.forEach((h, i) => expect(h.score).toBeCloseTo(oracle[i]?.score as number, 9));
+    expect(recorded).toHaveBeenCalledTimes(1);
+    expect(recorded).toHaveBeenCalledWith(
+      expect.objectContaining({ count: 200, warmup: true, queuedMs: 0 }),
+    );
+    await client.close();
+  });
+
+  it('a failing index surfaces a tool error and records a failure', async () => {
+    const failing: VectorIndex = { summarize: () => Promise.reject(new Error('index down')) };
+    const health = new SearchHealth({ log: () => {} });
+    const client = await mount(failing, health);
+
+    for (let i = 0; i < 3; i++) {
+      const res = await searchOverMcp(client, 'cargo');
+      expect(res.isError).toBe(true);
+      expect((res.content as Array<{ text: string }>)[0]?.text).toContain('index down');
+    }
+    expect(health.warning()?.startsWith('cavemem: hybrid search failing (3 of last 20)')).toBe(
+      true,
+    );
+    await client.close();
+  });
+
+  it('scrubs provider errors from health logs and unrelated session-start warnings', async () => {
+    const apiKey = 'fixture-key-1234567890';
+    const query = 'cargo <private>private-query-marker</private>';
+    const provider = createHttpServer(async (req, res) => {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const input = (JSON.parse(body) as { input: string }).input;
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: input, api_key: req.headers.authorization?.slice(7) }));
+    });
+    await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve));
+    let client: Client | undefined;
+    try {
+      const address = provider.address();
+      if (!address || typeof address === 'string') throw new Error('no provider port');
+      const remote = await createEmbedder({
+        ...defaultSettings,
+        embedding: {
+          ...defaultSettings.embedding,
+          provider: 'openai',
+          model: 'text-embedding-3-small',
+          endpoint: `http://127.0.0.1:${address.port}`,
+          apiKey,
+        },
+      });
+      if (!remote) throw new Error('no embedder');
+      const logs: Record<string, unknown>[] = [];
+      const health = new SearchHealth({ log: (line) => logs.push(line) });
+      const unused: VectorIndex = { summarize: () => Promise.reject(new Error('unused')) };
+      client = await mount(unused, health, remote);
+      for (let i = 0; i < 3; i++) {
+        expect((await searchOverMcp(client, query)).isError).toBe(true);
+      }
+      const response = await fetch(`http://127.0.0.1:${port}/api/hooks/session-start`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ session_id: 'unrelated-session', cwd: '/other-project' }),
+      });
+      expect(response.status).toBe(200);
+      const result = (await response.json()) as { warning: string };
+      expect(result.warning).toContain('hybrid search failing (3 of last 20)');
+      expect(result.warning).toContain('OpenAI embed failed: 400');
+      expect(logs).toHaveLength(1);
+      for (const output of [result.warning, JSON.stringify(logs)]) {
+        expect(output).not.toContain('private-query-marker');
+        expect(output).not.toContain(apiKey);
+        expect(output).toContain('[REDACTED]');
+      }
+    } finally {
+      await client?.close();
+      await new Promise<void>((resolve, reject) =>
+        provider.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
+  it('keyword-only searches record nothing', async () => {
+    const never: VectorIndex = { summarize: () => Promise.reject(new Error('unused')) };
+    const health = new SearchHealth({ log: () => {} });
+    const ok = vi.spyOn(health, 'recordSuccess');
+    const bad = vi.spyOn(health, 'recordFailure');
+    port = await freePort();
+    // No embedder: the index must never be consulted and nothing is recorded.
+    const app = buildApp(store, { port, token: TOKEN, embedder: null, vectorIndex: never, health });
+    server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' });
+    const client = await connect({ authorization: `Bearer ${TOKEN}` });
+    const res = await searchOverMcp(client, 'cargo');
+    expect(res.isError).toBeFalsy();
+    expect(ok).not.toHaveBeenCalled();
+    expect(bad).not.toHaveBeenCalled();
+    await client.close();
   });
 });

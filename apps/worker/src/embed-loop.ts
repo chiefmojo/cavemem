@@ -96,6 +96,10 @@ export function startEmbedLoop(opts: {
   snapshot();
 
   const processOnce = async (): Promise<boolean> => {
+    // The backlog query reads every embedding row on the main event loop when
+    // nothing is missing; these counts are index-only.
+    const embedded = store.storage.countEmbeddings({ model: embedder.model, dim: embedder.dim });
+    if (embedded >= store.storage.countObservations()) return false;
     const rows = store.storage.observationsMissingEmbeddings(batchSize, embedder.model);
     if (rows.length === 0) return false;
     const t0 = Date.now();

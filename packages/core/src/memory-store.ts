@@ -1,8 +1,21 @@
 import { compress, expand, redactPrivate, redactSecrets } from '@cavemem/compress';
 import type { Settings } from '@cavemem/config';
 import { type NewObservation, type ObservationRow, Storage } from '@cavemem/storage';
-import { cosine, hybridRank } from './ranker.js';
+import { rankFromSummary } from './ranker.js';
 import type { GetObservationsOptions, Observation, SearchResult } from './types.js';
+import {
+  type VectorIndex,
+  type VectorSummary,
+  normalizeInto,
+  scanContiguous,
+} from './vector-scan.js';
+
+export interface SearchOptions {
+  /** Scans vectors off the caller's thread; absent means scan in-process. */
+  index?: VectorIndex;
+  /** Called once per hybrid search with the scan summary, before ranking. */
+  onSummary?: (s: VectorSummary) => void;
+}
 
 export interface MemoryStoreOptions {
   dbPath: string;
@@ -122,35 +135,54 @@ export class MemoryStore {
 
   // --- search ---
 
-  async search(query: string, limit?: number, embedder?: Embedder): Promise<SearchResult[]> {
+  async search(
+    query: string,
+    limit?: number,
+    embedder?: Embedder,
+    opts: SearchOptions = {},
+  ): Promise<SearchResult[]> {
     const cap = limit ?? this.settings.search.defaultLimit;
     const alpha = this.settings.search.alpha;
     const keyword = this.storage.searchFts(query, cap * 2);
-    if (!embedder || this.settings.embedding.provider === 'none') {
+    // alpha = 1 gives every vector-only item a zero score, so vectors cannot
+    // change the keyword ranking; skip the embed and the scan.
+    if (!embedder || this.settings.embedding.provider === 'none' || alpha === 1) {
       return keyword.slice(0, cap);
     }
-    const vectors = this.storage.allEmbeddings({ model: embedder.model, dim: embedder.dim });
-    if (vectors.length === 0) return keyword.slice(0, cap);
-    const qvec = await embedder.embed(query);
-    if (qvec.length !== embedder.dim) {
-      // Provider lied about dim — skip vector ranking rather than mix dims.
-      return keyword.slice(0, cap);
+    const keywordIds = keyword.map((k) => k.id);
+
+    let summary: VectorSummary;
+    if (opts.index) {
+      const qvec = await embedder.embed(query);
+      if (qvec.length !== embedder.dim) return keyword.slice(0, cap);
+      summary = await opts.index.summarize(qvec, keywordIds, cap);
+    } else {
+      const vectors = this.storage.allEmbeddings({ model: embedder.model, dim: embedder.dim });
+      if (vectors.length === 0) return keyword.slice(0, cap);
+      const qvec = await embedder.embed(query);
+      if (qvec.length !== embedder.dim) {
+        // Provider lied about dim — skip vector ranking rather than mix dims.
+        return keyword.slice(0, cap);
+      }
+      const dim = embedder.dim;
+      const data = new Float32Array(vectors.length * dim);
+      const ids = new Float64Array(vectors.length);
+      let n = 0;
+      for (const v of vectors) {
+        // A malformed BLOB would make normalizeInto read past the vector.
+        if (v.vec.length !== dim) continue;
+        normalizeInto(data, n, v.vec, dim);
+        ids[n++] = v.observation_id;
+      }
+      summary = {
+        ...scanContiguous(data, ids, n, dim, qvec, new Set(keywordIds), cap),
+        queuedMs: 0,
+        warmup: false,
+      };
     }
-    const scored = vectors.map((v) => ({
-      id: v.observation_id,
-      cosine: cosine(qvec, v.vec),
-    }));
-    const merged = new Map<number, { bm25?: number; cosine?: number }>();
-    for (const k of keyword) merged.set(k.id, { bm25: k.score });
-    for (const s of scored) {
-      const cur = merged.get(s.id) ?? {};
-      cur.cosine = s.cosine;
-      merged.set(s.id, cur);
-    }
-    const ranked = hybridRank(
-      Array.from(merged, ([id, v]) => ({ id, ...v })),
-      alpha,
-    ).slice(0, cap);
+    if (summary.count === 0) return keyword.slice(0, cap);
+    opts.onSummary?.(summary);
+    const ranked = rankFromSummary(keyword, summary, alpha).slice(0, cap);
     const infoById = new Map<number, { session_id: string; snippet: string; ts: number }>(
       keyword.map((k) => [k.id, { session_id: k.session_id, snippet: k.snippet, ts: k.ts }]),
     );
