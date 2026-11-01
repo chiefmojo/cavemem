@@ -46,6 +46,26 @@ describe('fixNewestEntry', () => {
     expect(fixNewestEntry(formatted)).toBe(formatted);
   });
 
+  // @changesets/cli 3.0.3, `"format": false`: heading spacing is fixed upstream,
+  // the whitespace-only paragraph separator is not.
+  it('fixes only the paragraph separator in 3.x output', () => {
+    const v3 = [
+      '# @cavemem/storage',
+      '',
+      '## 0.5.1',
+      '',
+      '### Patch Changes',
+      '',
+      '- Probe: storage fix, first paragraph.',
+      '  ',
+      '  Second paragraph of the same item, to check multi-paragraph spacing.',
+      '',
+      '## 0.4.0',
+      '',
+    ].join('\n');
+    expect(fixNewestEntry(v3)).toBe(v3.replace('paragraph.\n  \n', 'paragraph.\n\n'));
+  });
+
   it('is a no-op on a changelog with no version entries', () => {
     expect(fixNewestEntry('# cavemem\n')).toBe('# cavemem\n');
   });
