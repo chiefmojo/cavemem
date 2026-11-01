@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// Runs after `changeset version`. With `"prettier": false` (needed so changesets
-// stops reformatting old CHANGELOG entries), @changesets/cli 2.x writes the new
-// entry unformatted: no blank line after `## <version>`, and whitespace-only
-// lines inside multi-paragraph items. Upstream fixed the heading join in 3.0.0
-// (changesets/changesets#2118); this covers 2.x. Only the newest entry is
-// touched, so older entries stay byte-for-byte as released.
+// Runs after `changeset version`. With `"format": false` (needed so changesets
+// stops reformatting old CHANGELOG entries), changesets writes the new entry
+// unformatted. 2.x left no blank line after `## <version>`; 3.x fixed that
+// (changesets/changesets#2118). Both still write whitespace-only lines inside
+// multi-paragraph items: @changesets/changelog-git indents every continuation
+// line, blank ones included. Only the newest entry is touched, so older entries
+// stay byte-for-byte as released.
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
